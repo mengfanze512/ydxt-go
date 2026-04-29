@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"time"
 	"yuedi_edu/internal/config"
 
 	rtctokenbuilder "github.com/AgoraIO/Tools/DynamicKey/AgoraDynamicKey/go/src/rtctokenbuilder2"
@@ -34,8 +33,6 @@ func GenerateRTCToken(c *gin.Context) {
 
 	// Token 有效期设为 2 小时
 	expireTimeInSeconds := uint32(7200)
-	currentTimestamp := uint32(time.Now().UTC().Unix())
-	expireTimestamp := currentTimestamp + expireTimeInSeconds
 
 	// 角色映射
 	var role rtctokenbuilder.Role
