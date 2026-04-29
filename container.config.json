@@ -1,0 +1,17 @@
+{
+  "containerPort": 80,
+  "dockerfilePath": "Dockerfile",
+  "buildDir": "",
+  "minNum": 0,
+  "maxNum": 5,
+  "cpu": 0.25,
+  "mem": 0.5,
+  "policyType": "cpu",
+  "policyThreshold": 60,
+  "customLogs": "stdout",
+  "envParams": {
+    "MYSQL_ADDRESS": "",
+    "MYSQL_PASSWORD": "",
+    "MYSQL_USERNAME": "root"
+  }
+}
