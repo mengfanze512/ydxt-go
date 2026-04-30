@@ -31,6 +31,8 @@ func InitRouter() *gin.Engine {
 		{
 			// 微信小程序静默登录换取 Token
 			public.POST("/auth/wx-login", WxLogin)
+			// H5/App 手机号密码/验证码登录
+			public.POST("/auth/phone-login", PhoneLogin)
 			// 管理后台登录
 			public.POST("/admin/login", AdminLogin)
 			// TODO: 获取公开课程列表
@@ -49,6 +51,8 @@ func InitRouter() *gin.Engine {
 					role, _ := c.Get("role")
 					c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": gin.H{"user_id": userID, "role": role}})
 				})
+				// 修改密码
+				userGroup.POST("/change-password", ChangePassword)
 			}
 
 			// 音视频直播模块
