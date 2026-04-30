@@ -38,12 +38,16 @@ func AdminLogin(c *gin.Context) {
 		if req.Username == "admin" && req.Password == "123456" {
 			user = model.User{
 				Phone:    "admin",
+				OpenID:   "admin_dummy_openid", // openid 在数据库是必填项，所以填一个默认值
 				Password: "admin_password_hash", // 这里实际应该存 bcrypt hash
 				Role:     9,
 				Status:   1,
 				Nickname: "超级管理员",
 			}
-			model.DB.Create(&user)
+			if err := model.DB.Create(&user).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建管理员账号失败: " + err.Error()})
+				return
+			}
 		} else {
 			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户名或密码错误"})
 			return
