@@ -15,7 +15,8 @@ import (
 )
 
 type LoginRequest struct {
-	Code string `json:"code"`
+	Code      string `json:"code"`
+	PhoneCode string `json:"phone_code"` // 新增: 用于获取手机号的 code
 }
 
 type PhoneLoginRequest struct {
@@ -237,23 +238,57 @@ func WxLogin(c *gin.Context) {
 		return
 	}
 
-	// 3. 在数据库中查询用户，如果没有则自动注册
+	// 3. 处理手机号获取 (多端账号互通的主键)
+	phone := ""
+	if req.PhoneCode != "" {
+		// 在真实企业小程序中，应调用微信接口用 PhoneCode 换取真实手机号
+		// URL: POST https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=ACCESS_TOKEN
+		// 这里由于我们可能是个人开发者测试，无法获取权限，因此做一个 Mock 兼容逻辑：
+		if len(req.PhoneCode) >= 4 {
+			phone = "1380000" + req.PhoneCode[len(req.PhoneCode)-4:]
+		} else {
+			phone = "13800001234"
+		}
+	}
+
+	// 4. 在数据库中查询用户，如果没有则自动注册
 	var user model.User
-	result := model.DB.Where("openid = ?", session.OpenID).First(&user)
+	var result *gorm.DB
+
+	if phone != "" {
+		// 如果获取到了手机号，优先用手机号查询，以实现 H5/App/小程序 的账号互通
+		result = model.DB.Where("phone = ?", phone).First(&user)
+	} else {
+		// 否则退退求其次，用 OpenID 查询
+		result = model.DB.Where("openid = ?", session.OpenID).First(&user)
+	}
+
 	if result.Error != nil {
-		// 查不到，自动注册新用户 (默认身份是学生 role=1)
+		// 查不到，自动注册新用户
 		user = model.User{
+			Phone:  phone,
 			OpenID: session.OpenID,
-			Role:   1, 
+			Role:   1, // 默认学员
 			Status: 1,
+			Nickname: "微信用户",
+		}
+		if phone != "" {
+			user.Nickname = "用户_" + phone[len(phone)-4:]
 		}
 		if err := model.DB.Create(&user).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "自动注册失败"})
 			return
 		}
+	} else {
+		// 如果用户已存在，但此时我们又获得了他的 OpenID（比如他以前是在H5用手机号注册的，现在第一次用小程序登录）
+		// 我们需要把 OpenID 绑定到他的账号上
+		if user.OpenID == "" || user.OpenID != session.OpenID {
+			user.OpenID = session.OpenID
+			model.DB.Save(&user)
+		}
 	}
 
-	// 4. 为该用户生成 JWT Token
+	// 5. 为该用户生成 JWT Token
 	token, err := utils.GenerateToken(user.ID, user.Role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
