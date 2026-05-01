@@ -43,6 +43,7 @@ func InitDB() {
 	})
 
 	if err != nil {
+		DB = nil // 确保连接失败时 DB 为 nil
 		log.Printf("Failed to connect database, but server will continue to start. Error: %v\n", err)
 		return
 	}

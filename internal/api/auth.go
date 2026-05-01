@@ -74,29 +74,44 @@ func PhoneLogin(c *gin.Context) {
 	}
 
 	var user model.User
-	result := model.DB.Where("phone = ?", req.Phone).First(&user)
-	
-	if result.Error != nil {
-		// 找不到用户：如果是验证码登录，可以考虑直接注册（取决于业务需求），这里暂时作为找不到处理
-		c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户不存在或密码错误"})
-		return
-	}
-
-	// 密码比对逻辑 (此处为了演示采用明文/简化逻辑，实际应为 bcrypt.CompareHashAndPassword)
-	if req.Password != "" {
-		if req.Password != user.Password && req.Password != "123456" { // 兼容默认测试密码
+	if model.DB == nil {
+		// Mock数据，以防本地没有运行 MySQL
+		if req.Password != "123456" && req.Code != "123456" {
+			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "本地测试：密码或验证码错误(请用123456)"})
+			return
+		}
+		user = model.User{
+			ID:       1,
+			Phone:    req.Phone,
+			Nickname: "测试用户",
+			Role:     1,
+			Status:   1,
+		}
+	} else {
+		result := model.DB.Where("phone = ?", req.Phone).First(&user)
+		
+		if result.Error != nil {
+			// 找不到用户：如果是验证码登录，可以考虑直接注册（取决于业务需求），这里暂时作为找不到处理
 			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户不存在或密码错误"})
 			return
 		}
-	} else if req.Code != "" {
-		// 验证码比对逻辑 (略，通常从 Redis 中获取并比对)
-		if req.Code != "123456" { // 假设万能测试验证码为 123456
-			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "验证码错误"})
+
+		// 密码比对逻辑 (此处为了演示采用明文/简化逻辑，实际应为 bcrypt.CompareHashAndPassword)
+		if req.Password != "" {
+			if req.Password != user.Password && req.Password != "123456" { // 兼容默认测试密码
+				c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户不存在或密码错误"})
+				return
+			}
+		} else if req.Code != "" {
+			// 验证码比对逻辑 (略，通常从 Redis 中获取并比对)
+			if req.Code != "123456" { // 假设万能测试验证码为 123456
+				c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "验证码错误"})
+				return
+			}
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请提供密码或验证码"})
 			return
 		}
-	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请提供密码或验证码"})
-		return
 	}
 
 	// 登录成功，生成 Token

@@ -1,7 +1,7 @@
 server:
   # 微信云托管必须监听 80 端口
   port: 80
-  mode: debug
+  mode: release
 
 database:
   # 这里的 DSN 只是本地兜底用，线上会优先读取云托管的环境变量
