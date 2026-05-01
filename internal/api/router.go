@@ -13,19 +13,6 @@ func InitRouter() *gin.Engine {
 
 	// 全局中间件：跨域、恢复等
 	r.Use(gin.Recovery())
-	// 增加简单的跨域中间件
-	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-		c.Next()
-	})
 
 	// 测试健康检查接口 (微信云托管非常需要这个来探测容器存活)
 	r.GET("/ping", func(c *gin.Context) {

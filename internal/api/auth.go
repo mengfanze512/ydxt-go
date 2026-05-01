@@ -74,32 +74,32 @@ func PhoneLogin(c *gin.Context) {
 	}
 
 	var user model.User
-	if model.DB == nil {
-		// Mock数据，以防本地没有运行 MySQL
-		if req.Password != "123456" && req.Code != "123456" {
-			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "本地测试：密码或验证码错误(请用123456)"})
-			return
-		}
-		user = model.User{
-			ID:       1,
-			Phone:    req.Phone,
-			Nickname: "测试用户",
-			Role:     1,
-			Status:   1,
-		}
-	} else {
-		result := model.DB.Where("phone = ?", req.Phone).First(&user)
-		
-		if result.Error != nil {
-			// 找不到用户：如果是验证码登录，可以考虑直接注册（取决于业务需求），这里暂时作为找不到处理
+	result := model.DB.Where("phone = ?", req.Phone).First(&user)
+	
+	if result.Error != nil {
+		// 找不到用户：如果是验证码登录或者测试密码登录，自动注册该用户
+		if req.Code == "123456" || req.Password == "123456" {
+			hashedPwd, _ := bcrypt.GenerateFromPassword([]byte("123456"), bcrypt.DefaultCost)
+			user = model.User{
+				Phone:    req.Phone,
+				Password: string(hashedPwd),
+				Role:     1, // 默认注册为普通学员
+				Status:   1,
+				Nickname: "用户_" + req.Phone[len(req.Phone)-4:], // 取手机号后4位
+			}
+			if err := model.DB.Create(&user).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "自动注册失败"})
+				return
+			}
+		} else {
 			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户不存在或密码错误"})
 			return
 		}
-
+	} else {
 		// 密码比对逻辑 (此处为了演示采用明文/简化逻辑，实际应为 bcrypt.CompareHashAndPassword)
 		if req.Password != "" {
 			if req.Password != user.Password && req.Password != "123456" { // 兼容默认测试密码
-				c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户不存在或密码错误"})
+				c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "密码错误"})
 				return
 			}
 		} else if req.Code != "" {
