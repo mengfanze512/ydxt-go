@@ -49,7 +49,8 @@ func InitRouter() *gin.Engine {
 			public.POST("/auth/phone-login", PhoneLogin)
 			// 管理后台登录
 			public.POST("/admin/login", AdminLogin)
-			// TODO: 获取公开课程列表
+			// 获取公开课程列表
+			public.GET("/courses", GetCourseList)
 		}
 
 		// === 需要登录鉴权的接口 ===
@@ -83,6 +84,14 @@ func InitRouter() *gin.Engine {
 				teacherGroup.GET("/my-classes", func(c *gin.Context) {
 					c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "这里是教师专有的班级数据"})
 				})
+			}
+
+			// === 仅限管理员操作的接口 ===
+			adminGroup := auth.Group("/admin")
+			adminGroup.Use(middleware.RoleAuth(9)) // 仅允许管理员访问
+			{
+				adminGroup.GET("/users", AdminGetUsers)
+				adminGroup.GET("/courses", AdminGetCourses)
 			}
 		}
 	}

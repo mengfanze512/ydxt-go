@@ -62,5 +62,11 @@ func InitDB() {
 	// 设置了连接可复用的最大时间
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
+	// 自动迁移数据库结构
+	err = DB.AutoMigrate(&User{}, &Course{})
+	if err != nil {
+		log.Printf("Failed to auto migrate database: %v\n", err)
+	}
+
 	log.Println("Database connection established successfully!")
 }
