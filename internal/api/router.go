@@ -91,7 +91,13 @@ func InitRouter() *gin.Engine {
 			adminGroup.Use(middleware.RoleAuth(9)) // 仅允许管理员访问
 			{
 				adminGroup.GET("/users", AdminGetUsers)
+				
+				// 课程管理相关接口
 				adminGroup.GET("/courses", AdminGetCourses)
+				adminGroup.POST("/courses", AdminCreateCourse)
+				adminGroup.PUT("/courses/:id", AdminUpdateCourse)
+				adminGroup.DELETE("/courses/:id", AdminDeleteCourse)
+				adminGroup.PUT("/courses/:id/status", AdminUpdateCourseStatus)
 			}
 		}
 	}
