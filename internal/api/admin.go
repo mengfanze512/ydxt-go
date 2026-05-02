@@ -79,7 +79,7 @@ func AdminUpdateCourse(c *gin.Context) {
 	// 允许更新的字段
 	updates := map[string]interface{}{
 		"title":       req.Title,
-		"cover":       req.Cover,
+		"cover_url":   req.Cover,
 		"price":       req.Price,
 		"teacher_id":  req.TeacherID,
 		"category":    req.Category,
