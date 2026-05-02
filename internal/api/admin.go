@@ -43,7 +43,7 @@ func AdminGetCourses(c *gin.Context) {
 func AdminCreateCourse(c *gin.Context) {
 	var req model.Course
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误: " + err.Error()})
 		return
 	}
 
