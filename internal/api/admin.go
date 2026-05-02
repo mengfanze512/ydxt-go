@@ -83,8 +83,8 @@ func AdminUpdateCourse(c *gin.Context) {
 		"price":       req.Price,
 		"teacher_id":  req.TeacherID,
 		"category":    req.Category,
-		"level":       req.Level,
-		"description": req.Desc,
+		"difficulty":  req.Difficulty,
+		"type":        req.Type,
 		"status":      req.Status,
 	}
 
