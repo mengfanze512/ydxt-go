@@ -4,7 +4,7 @@ import "time"
 
 // Course 对应表 courses 的映射实体模型
 type Course struct {
-	ID           uint64    `gorm:"primaryKey;column:id" json:"id"`
+	ID           uint64    `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
 	Title        string    `gorm:"column:title" json:"title"`               // 课程标题
 	Cover        string    `gorm:"column:cover" json:"cover"`               // 课程封面图
 	Price        float64   `gorm:"column:price;type:decimal(10,2)" json:"price"` // 价格

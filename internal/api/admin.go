@@ -48,7 +48,7 @@ func AdminCreateCourse(c *gin.Context) {
 	}
 
 	if err := model.DB.Create(&req).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增课程失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增课程失败: " + err.Error()})
 		return
 	}
 
@@ -89,7 +89,7 @@ func AdminUpdateCourse(c *gin.Context) {
 	}
 
 	if err := model.DB.Model(&course).Updates(updates).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新课程失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新课程失败: " + err.Error()})
 		return
 	}
 
@@ -112,7 +112,7 @@ func AdminDeleteCourse(c *gin.Context) {
 	}
 
 	if err := model.DB.Model(&course).Update("is_deleted", 1).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除课程失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除课程失败: " + err.Error()})
 		return
 	}
 
@@ -143,7 +143,7 @@ func AdminUpdateCourseStatus(c *gin.Context) {
 	}
 
 	if err := model.DB.Model(&course).Update("status", req.Status).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新课程状态失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新课程状态失败: " + err.Error()})
 		return
 	}
 
