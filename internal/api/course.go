@@ -9,17 +9,17 @@ import (
 
 // GetCourseList 获取公开课程列表 (支持前台分页和分类)
 func GetCourseList(c *gin.Context) {
-	category := c.Query("category") // 例如: "入门", "进阶", "考级"
-	level := c.Query("level")       // 例如: "system", "1v1", "vip"
+	category := c.Query("category") // 例如: "1", "2"
+	difficulty := c.Query("difficulty")       // 例如: "1", "2"
 
 	var courses []model.Course
 	query := model.DB.Where("status = ?", 1).Where("is_deleted = ?", 0)
 
-	if category != "" && category != "全部" {
+	if category != "" && category != "0" && category != "全部" {
 		query = query.Where("category = ?", category)
 	}
-	if level != "" {
-		query = query.Where("level = ?", level)
+	if difficulty != "" && difficulty != "0" {
+		query = query.Where("difficulty = ?", difficulty)
 	}
 
 	if err := query.Order("created_at desc").Find(&courses).Error; err != nil {
@@ -40,10 +40,10 @@ func GetCourseList(c *gin.Context) {
 	// 如果没有数据，返回一些 mock 数据用于前端演示
 	if len(courses) == 0 {
 		courses = []model.Course{
-			{ID: 1, Title: "零基础竹笛入门 30 天精通", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 199.00, TeacherName: "张三名师", Category: "入门", Level: "system", StudentCount: 1280},
-			{ID: 2, Title: "葫芦丝考级冲刺班 (七级-十级)", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 299.00, TeacherName: "李四名师", Category: "考级", Level: "system", StudentCount: 860},
-			{ID: 3, Title: "古筝名曲《高山流水》精讲", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 99.00, TeacherName: "王五名师", Category: "进阶", Level: "system", StudentCount: 320},
-			{ID: 4, Title: "二胡 1对1 在线私教陪练", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 300.00, TeacherName: "特邀讲师", Category: "进阶", Level: "1v1", StudentCount: 50},
+			{ID: 1, Title: "零基础吉他入门 30 天精通", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 19900, TeacherName: "张三名师", Category: 1, Difficulty: 1, Type: 1, StudentCount: 1280},
+			{ID: 2, Title: "钢琴考级冲刺班 (七级-十级)", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 29900, TeacherName: "李四名师", Category: 2, Difficulty: 3, Type: 1, StudentCount: 860},
+			{ID: 3, Title: "架子鼓名曲精讲", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 9900, TeacherName: "王五名师", Category: 3, Difficulty: 2, Type: 1, StudentCount: 320},
+			{ID: 4, Title: "钢琴 1对1 在线私教陪练", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 30000, TeacherName: "特邀讲师", Category: 2, Difficulty: 2, Type: 2, StudentCount: 50},
 		}
 	}
 
