@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-	"yuedi_edu/internal/config"
+	"ydxt-go/internal/config"
 
-	"github.com/AgoraIO/Tools/DynamicKey/AgoraDynamicKey/go/src/rtctokenbuilder"
+	rtctokenbuilder "github.com/AgoraIO/Tools/DynamicKey/AgoraDynamicKey/go/src/rtctokenbuilder2"
 	"github.com/gin-gonic/gin"
 )
 
@@ -34,19 +34,23 @@ func GenerateRTCToken(c *gin.Context) {
 
 	// Token 有效期设为 2 小时
 	expireTimeInSeconds := uint32(7200)
-	currentTimestamp := uint32(time.Now().UTC().Unix())
-	expireTimestamp := currentTimestamp + expireTimeInSeconds
+	currentTimestamp := uint32(time.Now().Unix())
+	privilegeExpiredTs := currentTimestamp + expireTimeInSeconds
 
-	// 角色映射
+	// 转换为 rtctokenbuilder2 的角色定义
 	var role rtctokenbuilder.Role
 	if req.Role == 1 {
-		role = rtctokenbuilder.RolePublisher // 老师推流
+		role = rtctokenbuilder.RolePublisher
 	} else {
-		role = rtctokenbuilder.RoleSubscriber // 学生拉流
+		role = rtctokenbuilder.RoleSubscriber
 	}
 
-	// 生成 Token
-	token, err := rtctokenbuilder.BuildTokenWithUID(appID, appCertificate, req.ChannelName, req.Uid, role, expireTimestamp)
+	// 生成 Token (rtctokenbuilder2 的方法签名有所不同，通常多了一个 tokenExpire 参数)
+	// 在 rtctokenbuilder2 中，通常使用 BuildTokenWithUid
+	token, err := rtctokenbuilder.BuildTokenWithUid(
+		appID, appCertificate, req.ChannelName, req.Uid,
+		role, privilegeExpiredTs, privilegeExpiredTs,
+	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": fmt.Sprintf("Token 生成失败: %v", err)})
 		return
