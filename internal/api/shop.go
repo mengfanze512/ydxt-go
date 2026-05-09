@@ -9,6 +9,10 @@ import (
 
 // GetShopGoods 获取商城商品列表
 func GetShopGoods(c *gin.Context) {
+	if model.DB == nil {
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": []model.ShopGoods{}})
+		return
+	}
 	var goods []model.ShopGoods
 	// 简单查询所有上架商品
 	if err := model.DB.Where("status = ?", 1).Find(&goods).Error; err != nil {

@@ -9,6 +9,10 @@ import (
 
 // GetCourseList 获取公开课程列表 (支持前台分页和分类)
 func GetCourseList(c *gin.Context) {
+	if model.DB == nil {
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": []model.Course{}})
+		return
+	}
 	category := c.Query("category") // 例如: "入门", "进阶", "考级"
 	level := c.Query("level")       // 例如: "system", "1v1", "vip"
 

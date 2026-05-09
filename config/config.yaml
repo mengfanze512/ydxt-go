@@ -1,6 +1,6 @@
 server:
-  # 微信云托管必须监听 80 端口
-  port: 80
+  # 本地开发监听 8080 端口，微信云托管可以通过 Dockerfile 暴露对应端口
+  port: 8080
   mode: release
 
 database:
