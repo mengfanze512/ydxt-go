@@ -23,17 +23,7 @@ func AdminGetUsers(c *gin.Context) {
 	})
 }
 
-// AdminGetCourses 获取课程列表(包含下架的)
+// AdminGetCourses 获取全部课程（后台）
 func AdminGetCourses(c *gin.Context) {
-	var courses []model.Course
-	if err := model.DB.Where("is_deleted = ?", 0).Order("created_at desc").Find(&courses).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取课程列表失败"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"msg":  "success",
-		"data": courses,
-	})
+	GetCourseList(c)
 }

@@ -125,10 +125,6 @@ func InitRouter() *gin.Engine {
 				
 				// 课程管理相关接口
 				adminGroup.GET("/courses", AdminGetCourses)
-				adminGroup.POST("/courses", AdminCreateCourse)
-				adminGroup.PUT("/courses/:id", AdminUpdateCourse)
-				adminGroup.DELETE("/courses/:id", AdminDeleteCourse)
-				adminGroup.PUT("/courses/:id/status", AdminUpdateCourseStatus)
 
 				// 财务结算
 				adminGroup.GET("/finance/settlements", GetSettlements)

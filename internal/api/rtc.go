@@ -8,6 +8,7 @@ import (
 	"ydxt-go/internal/model"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 )
 
 type ApplyMicRequest struct {
@@ -32,7 +33,7 @@ func ApplyMic(c *gin.Context) {
 	// Redis 中使用 ZSet 存储举手队列，按时间戳排序
 	queueKey := fmt.Sprintf("live:%d:mic_queue", req.LessonID)
 	
-	err := model.RDB.ZAdd(context.Background(), queueKey, &model.RDB.Z{
+	err := model.RDB.ZAdd(context.Background(), queueKey, &redis.Z{
 		Score:  float64(time.Now().Unix()),
 		Member: studentID,
 	}).Err()
