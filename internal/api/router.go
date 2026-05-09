@@ -133,7 +133,6 @@ func InitRouter() *gin.Engine {
 				adminGroup.GET("/finance/settlements", GetSettlements)
 				
 				// 临时兼容部分前端的通用请求 (如果带有 token 会走到这里)
-				adminGroup.GET("/orders", GetOrderList)
 				adminGroup.GET("/community/posts", GetPosts)
 				adminGroup.GET("/practice/records", GetPracticeRecords)
 			}
