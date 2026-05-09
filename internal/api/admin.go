@@ -25,5 +25,23 @@ func AdminGetUsers(c *gin.Context) {
 
 // AdminGetCourses 获取全部课程（后台）
 func AdminGetCourses(c *gin.Context) {
-	GetCourseList(c)
+	if model.DB == nil {
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": []model.Course{}})
+		return
+	}
+
+	var courses []model.Course
+	if err := model.DB.Where("is_deleted = ?", 0).Order("created_at desc").Find(&courses).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取课程列表失败"})
+		return
+	}
+
+	for i, course := range courses {
+		var teacher model.User
+		if err := model.DB.Where("id = ?", course.TeacherID).First(&teacher).Error; err == nil {
+			courses[i].TeacherName = teacher.Nickname
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": courses})
 }
