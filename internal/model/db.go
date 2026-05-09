@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -8,12 +9,16 @@ import (
 
 	"yuedi_edu/internal/config"
 
+	"github.com/go-redis/redis/v8"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
-var DB *gorm.DB
+var (
+	DB  *gorm.DB
+	RDB *redis.Client
+)
 
 // InitDB 初始化数据库连接
 func InitDB() {
@@ -63,10 +68,30 @@ func InitDB() {
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	// 自动迁移数据库结构
-	err = DB.AutoMigrate(&User{}, &Course{})
+	err = DB.AutoMigrate(&User{}, &Course{}, &LiveRoom{}, &UserWallet{}, &LiveGiftRecord{})
 	if err != nil {
 		log.Printf("Failed to auto migrate database: %v\n", err)
 	}
 
 	log.Println("Database connection established successfully!")
+}
+
+// InitRedis 初始化 Redis 连接
+func InitRedis() {
+	rdbConfig := config.GlobalConfig.Redis
+	RDB = redis.NewClient(&redis.Options{
+		Addr:     rdbConfig.Addr,
+		Password: rdbConfig.Password,
+		DB:       rdbConfig.DB,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := RDB.Ping(ctx).Result()
+	if err != nil {
+		log.Printf("Failed to connect Redis: %v\n", err)
+	} else {
+		log.Println("Redis connection established successfully!")
+	}
 }

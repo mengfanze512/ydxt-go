@@ -15,6 +15,7 @@ func main() {
 
 	// 2. 初始化数据库 (GORM + MySQL)
 	model.InitDB()
+	model.InitRedis()
 
 	// 3. 注册所有的 Gin 路由
 	router := api.InitRouter()

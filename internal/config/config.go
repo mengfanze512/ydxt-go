@@ -9,6 +9,7 @@ import (
 type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
+	Redis    RedisConfig
 	JWT      JWTConfig
 	Wechat   WechatConfig
 	Agora    AgoraConfig
@@ -23,6 +24,12 @@ type DatabaseConfig struct {
 	DSN          string
 	MaxIdleConns int
 	MaxOpenConns int
+}
+
+type RedisConfig struct {
+	Addr     string
+	Password string
+	DB       int
 }
 
 type JWTConfig struct {

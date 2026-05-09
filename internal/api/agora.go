@@ -3,9 +3,10 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"time"
 	"yuedi_edu/internal/config"
 
-	rtctokenbuilder "github.com/AgoraIO/Tools/DynamicKey/AgoraDynamicKey/go/src/rtctokenbuilder2"
+	"github.com/AgoraIO/Tools/DynamicKey/AgoraDynamicKey/go/src/rtctokenbuilder"
 	"github.com/gin-gonic/gin"
 )
 
@@ -33,6 +34,8 @@ func GenerateRTCToken(c *gin.Context) {
 
 	// Token 有效期设为 2 小时
 	expireTimeInSeconds := uint32(7200)
+	currentTimestamp := uint32(time.Now().UTC().Unix())
+	expireTimestamp := currentTimestamp + expireTimeInSeconds
 
 	// 角色映射
 	var role rtctokenbuilder.Role
@@ -43,7 +46,7 @@ func GenerateRTCToken(c *gin.Context) {
 	}
 
 	// 生成 Token
-	token, err := rtctokenbuilder.BuildTokenWithUid(appID, appCertificate, req.ChannelName, req.Uid, role, expireTimeInSeconds, expireTimeInSeconds)
+	token, err := rtctokenbuilder.BuildTokenWithUID(appID, appCertificate, req.ChannelName, req.Uid, role, expireTimestamp)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": fmt.Sprintf("Token 生成失败: %v", err)})
 		return
