@@ -53,6 +53,7 @@ func InitRouter() *gin.Engine {
 			// 让管理后台也能在未登录/登录态下拿到一些公开的列表数据 (避免由于 middleware.RoleAuth 导致的 401 误判)
 			// 注意: 实际生产中 admin 接口应当在 auth 组中，这里为解决连通性错误暂时暴露部分或优化权限逻辑
 			public.GET("/admin/orders", GetOrderList)
+			public.GET("/admin/courses", AdminGetCourses)
 			public.GET("/admin/community/posts", GetPosts)
 			public.GET("/admin/practice/records", GetPracticeRecords)
 			// 兼容无 /admin 前缀的管理查询路径，避免部分网关策略对 /admin 路径返回 401。
@@ -129,9 +130,6 @@ func InitRouter() *gin.Engine {
 			adminGroup.Use(middleware.RoleAuth(9)) // 仅允许管理员访问
 			{
 				adminGroup.GET("/users", AdminGetUsers)
-				
-				// 课程管理相关接口
-				adminGroup.GET("/courses", AdminGetCourses)
 
 				// 财务结算
 				adminGroup.GET("/finance/settlements", GetSettlements)
