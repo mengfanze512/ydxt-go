@@ -132,9 +132,8 @@ func InitRouter() *gin.Engine {
 				// 财务结算
 				adminGroup.GET("/finance/settlements", GetSettlements)
 				
-				// 临时兼容部分前端的通用请求 (如果带有 token 会走到这里)
-				adminGroup.GET("/community/posts", GetPosts)
-				adminGroup.GET("/practice/records", GetPracticeRecords)
+				// 注意: /api/v1/admin/community/posts 与 /api/v1/admin/practice/records
+				// 已在 public 组注册，这里不能重复注册，否则 Gin 启动会 panic。
 			}
 		}
 	}

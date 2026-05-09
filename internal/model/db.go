@@ -67,14 +67,20 @@ func InitDB() {
 	// 设置了连接可复用的最大时间
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	// 自动迁移数据库结构
-	err = DB.AutoMigrate(
-		&User{}, &Course{}, &LiveRoom{}, &UserWallet{}, &LiveGiftRecord{},
-		&ShopGoods{}, &CartItem{}, &Order{}, &OrderItem{}, &SheetMusic{},
-		&UserCheckin{}, &PracticeRecord{}, &CommunityPost{}, &FinanceSettlement{},
-	)
-	if err != nil {
-		log.Printf("Failed to auto migrate database: %v\n", err)
+	// 云托管环境默认不执行 AutoMigrate，避免对已建索引字段进行隐式改类型导致启动失败。
+	// 如需启用迁移，请显式设置 ENABLE_AUTO_MIGRATE=true。
+	enableAutoMigrate := os.Getenv("ENABLE_AUTO_MIGRATE") == "true"
+	if enableAutoMigrate {
+		err = DB.AutoMigrate(
+			&User{}, &Course{}, &LiveRoom{}, &UserWallet{}, &LiveGiftRecord{},
+			&ShopGoods{}, &CartItem{}, &Order{}, &OrderItem{}, &SheetMusic{},
+			&UserCheckin{}, &PracticeRecord{}, &CommunityPost{}, &FinanceSettlement{},
+		)
+		if err != nil {
+			log.Printf("Failed to auto migrate database: %v\n", err)
+		}
+	} else {
+		log.Println("AutoMigrate skipped. Set ENABLE_AUTO_MIGRATE=true to enable schema migration.")
 	}
 
 	log.Println("Database connection established successfully!")
