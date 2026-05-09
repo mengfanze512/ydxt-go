@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"ydxt-go/internal/api"
 	"ydxt-go/internal/config"
@@ -20,8 +21,13 @@ func main() {
 	// 3. 注册所有的 Gin 路由
 	router := api.InitRouter()
 
-	// 4. 启动服务 (默认监听 8080 端口，微信云托管默认也是探测 80 端口)
-	port := fmt.Sprintf(":%d", config.GlobalConfig.Server.Port)
+	// 4. 启动服务
+	// 优先使用云环境注入的 PORT，避免健康检查端口与服务监听端口不一致。
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = fmt.Sprintf("%d", config.GlobalConfig.Server.Port)
+	}
+	port = ":" + port
 	log.Printf("Starting Server on port %s...\n", port)
 	
 	if err := router.Run(port); err != nil {

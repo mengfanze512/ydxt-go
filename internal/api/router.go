@@ -10,6 +10,8 @@ import (
 // InitRouter 初始化所有 API 路由
 func InitRouter() *gin.Engine {
 	r := gin.Default()
+	// 默认不信任任何代理，避免 “You trusted all proxies” 安全风险。
+	_ = r.SetTrustedProxies(nil)
 
 	// 全局中间件：跨域、恢复等
 	r.Use(gin.Recovery())
