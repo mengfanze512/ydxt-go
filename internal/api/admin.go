@@ -2,7 +2,7 @@ package api
 
 import (
 	"net/http"
-	"yuedi_edu/internal/model"
+	"ydxt-go/internal/model"
 
 	"github.com/gin-gonic/gin"
 )

@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"yuedi_edu/internal/model"
+	"ydxt-go/internal/model"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )

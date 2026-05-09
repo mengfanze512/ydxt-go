@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 	"time"
-	"yuedi_edu/internal/model"
+	"ydxt-go/internal/model"
 
 	"github.com/gin-gonic/gin"
 )

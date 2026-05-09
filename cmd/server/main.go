@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 
-	"yuedi_edu/internal/api"
-	"yuedi_edu/internal/config"
-	"yuedi_edu/internal/model"
+	"ydxt-go/internal/api"
+	"ydxt-go/internal/config"
+	"ydxt-go/internal/model"
 )
 
 func main() {

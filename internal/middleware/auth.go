@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"yuedi_edu/internal/utils"
+	"ydxt-go/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )

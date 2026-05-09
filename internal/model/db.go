@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"yuedi_edu/internal/config"
+	"ydxt-go/internal/config"
 
 	"github.com/go-redis/redis/v8"
 	"gorm.io/driver/mysql"

@@ -2,7 +2,7 @@ package utils
 
 import (
 	"time"
-	"yuedi_edu/internal/config"
+	"ydxt-go/internal/config"
 
 	"github.com/golang-jwt/jwt/v5"
 )

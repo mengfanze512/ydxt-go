@@ -3,9 +3,9 @@ package api
 import (
 	"log"
 	"net/http"
-	"yuedi_edu/internal/config"
-	"yuedi_edu/internal/model"
-	"yuedi_edu/internal/utils"
+	"ydxt-go/internal/config"
+	"ydxt-go/internal/model"
+	"ydxt-go/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/silenceper/wechat/v2"
