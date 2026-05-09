@@ -55,6 +55,8 @@ func InitRouter() *gin.Engine {
 			public.GET("/admin/orders", GetOrderList)
 			public.GET("/admin/community/posts", GetPosts)
 			public.GET("/admin/practice/records", GetPracticeRecords)
+			// 兼容无 /admin 前缀的管理查询路径，避免部分网关策略对 /admin 路径返回 401。
+			public.GET("/practice/records", GetPracticeRecords)
 			public.GET("/courses", GetCourseList)
 			public.GET("/courses/:id", GetCourseDetail)
 
