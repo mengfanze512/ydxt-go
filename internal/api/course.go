@@ -1,8 +1,10 @@
 package api
 
 import (
+	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"ydxt-go/internal/model"
 
 	"github.com/gin-gonic/gin"
@@ -100,25 +102,53 @@ func CreateCourse(c *gin.Context) {
 		return
 	}
 
-	course := model.Course{
-		Title:        req.Title,
-		Cover:        req.Cover,
-		Price:        req.Price,
-		TeacherID:    req.TeacherID,
-		Category:     req.Category,
-		Level:        req.Level,
-		Desc:         req.Desc,
-		StudentCount: req.StudentCount,
-		Status:       req.Status,
-		IsDeleted:    0,
+	columnTypes := getCourseColumnTypes()
+	insertData := map[string]interface{}{}
+	insertData["title"] = req.Title
+
+	if hasColumn(columnTypes, "cover") {
+		insertData["cover"] = req.Cover
+	}
+	if hasColumn(columnTypes, "cover_url") {
+		insertData["cover_url"] = req.Cover
+	}
+	if hasColumn(columnTypes, "teacher_id") {
+		insertData["teacher_id"] = req.TeacherID
+	}
+	if hasColumn(columnTypes, "category") {
+		insertData["category"] = convertCategoryValue(req.Category, columnTypes["category"])
+	}
+	if hasColumn(columnTypes, "level") {
+		insertData["level"] = req.Level
+	}
+	if hasColumn(columnTypes, "type") {
+		insertData["type"] = convertLevelToType(req.Level)
+	}
+	if hasColumn(columnTypes, "description") {
+		insertData["description"] = req.Desc
+	}
+	if hasColumn(columnTypes, "student_count") {
+		insertData["student_count"] = req.StudentCount
+	}
+	if hasColumn(columnTypes, "sales_count") {
+		insertData["sales_count"] = req.StudentCount
+	}
+	if hasColumn(columnTypes, "price") {
+		insertData["price"] = convertPriceValue(req.Price, columnTypes["price"])
+	}
+	if hasColumn(columnTypes, "status") {
+		insertData["status"] = req.Status
+	}
+	if hasColumn(columnTypes, "is_deleted") {
+		insertData["is_deleted"] = 0
 	}
 
-	if err := model.DB.Create(&course).Error; err != nil {
+	if err := model.DB.Table("courses").Create(insertData).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增课程失败"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": course})
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": insertData})
 }
 
 // UpdateCourse 后台更新课程
@@ -140,18 +170,44 @@ func UpdateCourse(c *gin.Context) {
 		return
 	}
 
-	updates := map[string]interface{}{
-		"title":         req.Title,
-		"cover":         req.Cover,
-		"price":         req.Price,
-		"teacher_id":    req.TeacherID,
-		"category":      req.Category,
-		"level":         req.Level,
-		"description":   req.Desc,
-		"student_count": req.StudentCount,
-		"status":        req.Status,
+	columnTypes := getCourseColumnTypes()
+	updates := map[string]interface{}{}
+	updates["title"] = req.Title
+	if hasColumn(columnTypes, "cover") {
+		updates["cover"] = req.Cover
 	}
-	result := model.DB.Model(&model.Course{}).Where("id = ? AND is_deleted = ?", id, 0).Updates(updates)
+	if hasColumn(columnTypes, "cover_url") {
+		updates["cover_url"] = req.Cover
+	}
+	if hasColumn(columnTypes, "teacher_id") {
+		updates["teacher_id"] = req.TeacherID
+	}
+	if hasColumn(columnTypes, "category") {
+		updates["category"] = convertCategoryValue(req.Category, columnTypes["category"])
+	}
+	if hasColumn(columnTypes, "level") {
+		updates["level"] = req.Level
+	}
+	if hasColumn(columnTypes, "type") {
+		updates["type"] = convertLevelToType(req.Level)
+	}
+	if hasColumn(columnTypes, "description") {
+		updates["description"] = req.Desc
+	}
+	if hasColumn(columnTypes, "student_count") {
+		updates["student_count"] = req.StudentCount
+	}
+	if hasColumn(columnTypes, "sales_count") {
+		updates["sales_count"] = req.StudentCount
+	}
+	if hasColumn(columnTypes, "price") {
+		updates["price"] = convertPriceValue(req.Price, columnTypes["price"])
+	}
+	if hasColumn(columnTypes, "status") {
+		updates["status"] = req.Status
+	}
+
+	result := model.DB.Table("courses").Where("id = ? AND is_deleted = ?", id, 0).Updates(updates)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新课程失败"})
 		return
@@ -222,4 +278,64 @@ func DeleteCourse(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
+}
+
+func getCourseColumnTypes() map[string]string {
+	types := map[string]string{}
+	rows, err := model.DB.Raw("SHOW COLUMNS FROM courses").Rows()
+	if err != nil {
+		return types
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var field, colType, nullable, key, extra string
+		var defaultValue interface{}
+		if err := rows.Scan(&field, &colType, &nullable, &key, &defaultValue, &extra); err == nil {
+			types[field] = strings.ToLower(colType)
+		}
+	}
+	return types
+}
+
+func hasColumn(columnTypes map[string]string, name string) bool {
+	_, ok := columnTypes[name]
+	return ok
+}
+
+func convertPriceValue(price float64, columnType string) interface{} {
+	if strings.Contains(columnType, "int") {
+		return int(math.Round(price * 100))
+	}
+	return price
+}
+
+func convertCategoryValue(category string, columnType string) interface{} {
+	if strings.Contains(columnType, "int") {
+		switch category {
+		case "入门":
+			return 1
+		case "进阶":
+			return 2
+		case "考级":
+			return 3
+		default:
+			if n, err := strconv.Atoi(category); err == nil {
+				return n
+			}
+			return 0
+		}
+	}
+	return category
+}
+
+func convertLevelToType(level string) int {
+	switch level {
+	case "1v1":
+		return 2
+	case "vip":
+		return 3
+	default:
+		return 1
+	}
 }
