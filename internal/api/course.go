@@ -86,7 +86,7 @@ type courseUpsertRequest struct {
 }
 
 type courseStatusRequest struct {
-	Status int8 `json:"status" binding:"required,oneof=0 1"`
+	Status int8 `json:"status" binding:"oneof=0 1"`
 }
 
 // CreateCourse 后台新增课程
