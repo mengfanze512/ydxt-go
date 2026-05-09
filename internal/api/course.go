@@ -20,7 +20,7 @@ func GetCourseList(c *gin.Context) {
 	level := c.Query("level")       // 例如: "system", "1v1", "vip"
 
 	var courses []model.Course
-	query := model.DB.Where("status = ?", 1).Where("is_deleted = ?", 0)
+	query := model.DB.Where("status = ?", 1)
 
 	if category != "" && category != "全部" {
 		query = query.Where("category = ?", category)
@@ -60,7 +60,7 @@ func GetCourseDetail(c *gin.Context) {
 
 	id := c.Param("id")
 	var course model.Course
-	if err := model.DB.Where("id = ? AND is_deleted = ?", id, 0).First(&course).Error; err != nil {
+	if err := model.DB.Where("id = ?", id).First(&course).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "课程不存在", "data": nil})
 		return
 	}
@@ -139,10 +139,6 @@ func CreateCourse(c *gin.Context) {
 	if hasColumn(columnTypes, "status") {
 		insertData["status"] = req.Status
 	}
-	if hasColumn(columnTypes, "is_deleted") {
-		insertData["is_deleted"] = 0
-	}
-
 	if err := model.DB.Table("courses").Create(insertData).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增课程失败"})
 		return
@@ -207,7 +203,7 @@ func UpdateCourse(c *gin.Context) {
 		updates["status"] = req.Status
 	}
 
-	result := model.DB.Table("courses").Where("id = ? AND is_deleted = ?", id, 0).Updates(updates)
+	result := model.DB.Table("courses").Where("id = ?", id).Updates(updates)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新课程失败"})
 		return
@@ -241,7 +237,7 @@ func UpdateCourseStatus(c *gin.Context) {
 		return
 	}
 
-	result := model.DB.Model(&model.Course{}).Where("id = ? AND is_deleted = ?", id, 0).Update("status", req.Status)
+	result := model.DB.Model(&model.Course{}).Where("id = ?", id).Update("status", req.Status)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新课程状态失败"})
 		return
@@ -254,7 +250,7 @@ func UpdateCourseStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
 }
 
-// DeleteCourse 后台删除课程（软删除）
+// DeleteCourse 后台删除课程（物理删除）
 func DeleteCourse(c *gin.Context) {
 	if model.DB == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "数据库未连接"})
@@ -267,7 +263,7 @@ func DeleteCourse(c *gin.Context) {
 		return
 	}
 
-	result := model.DB.Model(&model.Course{}).Where("id = ? AND is_deleted = ?", id, 0).Update("is_deleted", 1)
+	result := model.DB.Table("courses").Where("id = ?", id).Delete(nil)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除课程失败"})
 		return

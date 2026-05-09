@@ -17,7 +17,6 @@ type Course struct {
 	Status       int8      `gorm:"column:status" json:"status"`             // 1=上架, 0=下架
 	CreatedAt    time.Time `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt    time.Time `gorm:"column:updated_at" json:"updated_at"`
-	IsDeleted    int8      `gorm:"column:is_deleted" json:"is_deleted"`
 }
 
 // TableName 指定自定义表名

@@ -31,7 +31,7 @@ func AdminGetCourses(c *gin.Context) {
 	}
 
 	var courses []model.Course
-	if err := model.DB.Where("is_deleted = ?", 0).Order("created_at desc").Find(&courses).Error; err != nil {
+	if err := model.DB.Order("created_at desc").Find(&courses).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取课程列表失败"})
 		return
 	}
