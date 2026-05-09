@@ -41,16 +41,6 @@ func GetCourseList(c *gin.Context) {
 		}
 	}
 
-	// 如果没有数据，返回一些 mock 数据用于前端演示
-	if len(courses) == 0 {
-		courses = []model.Course{
-			{ID: 1, Title: "零基础竹笛入门 30 天精通", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 199.00, TeacherName: "张三名师", Category: "入门", Level: "system", StudentCount: 1280},
-			{ID: 2, Title: "葫芦丝考级冲刺班 (七级-十级)", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 299.00, TeacherName: "李四名师", Category: "考级", Level: "system", StudentCount: 860},
-			{ID: 3, Title: "古筝名曲《高山流水》精讲", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 99.00, TeacherName: "王五名师", Category: "进阶", Level: "system", StudentCount: 320},
-			{ID: 4, Title: "二胡 1对1 在线私教陪练", Cover: "https://img.yzcdn.cn/vant/cat.jpeg", Price: 300.00, TeacherName: "特邀讲师", Category: "进阶", Level: "1v1", StudentCount: 50},
-		}
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"msg":  "success",
@@ -58,7 +48,24 @@ func GetCourseList(c *gin.Context) {
 	})
 }
 
-// GetCourseDetail 获取单个课程详情 (占位方法，供 router 调用)
+// GetCourseDetail 获取单个课程详情
 func GetCourseDetail(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "开发中", "data": nil})
+	if model.DB == nil {
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": nil})
+		return
+	}
+
+	id := c.Param("id")
+	var course model.Course
+	if err := model.DB.Where("id = ? AND is_deleted = ?", id, 0).First(&course).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "课程不存在", "data": nil})
+		return
+	}
+
+	var teacher model.User
+	if err := model.DB.Where("id = ?", course.TeacherID).First(&teacher).Error; err == nil {
+		course.TeacherName = teacher.Nickname
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": course})
 }
