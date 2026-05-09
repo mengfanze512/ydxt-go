@@ -57,3 +57,8 @@ func GetCourseList(c *gin.Context) {
 		"data": courses,
 	})
 }
+
+// GetCourseDetail 获取单个课程详情 (占位方法，供 router 调用)
+func GetCourseDetail(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "开发中", "data": nil})
+}
