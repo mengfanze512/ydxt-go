@@ -73,8 +73,11 @@ func InitDB() {
 	if enableAutoMigrate {
 		err = DB.AutoMigrate(
 			&User{}, &Course{}, &LiveRoom{}, &UserWallet{}, &LiveGiftRecord{},
+			&CourseChapter{}, &CourseLesson{},
 			&ShopGoods{}, &CartItem{}, &Order{}, &OrderItem{}, &SheetMusic{},
 			&UserCheckin{}, &PracticeRecord{}, &CommunityPost{}, &FinanceSettlement{},
+			&LearningTask{}, &LearningTaskQuestion{}, &LearningTaskSubmission{},
+			&LearningTaskAnswer{}, &UserCourseProgress{}, &UserLessonProgress{},
 		)
 		if err != nil {
 			log.Printf("Failed to auto migrate database: %v\n", err)
