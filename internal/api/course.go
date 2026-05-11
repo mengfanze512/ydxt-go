@@ -74,15 +74,17 @@ func GetCourseDetail(c *gin.Context) {
 }
 
 type courseUpsertRequest struct {
-	Title       string  `json:"title" binding:"required"`
-	Cover       string  `json:"cover"`
-	Price       float64 `json:"price"`
-	TeacherID   uint64  `json:"teacher_id"`
-	Category    string  `json:"category"`
-	Level       string  `json:"level"`
-	Desc        string  `json:"description"`
-	StudentCount int    `json:"student_count"`
-	Status      int8    `json:"status"`
+	Title          string  `json:"title" binding:"required"`
+	Cover          string  `json:"cover"`
+	Price          float64 `json:"price"`
+	TeacherID      uint64  `json:"teacher_id"`
+	Category       string  `json:"category"`
+	Level          string  `json:"level"`
+	Desc           string  `json:"description"`
+	DetailContent  string  `json:"detail_content"`
+	CarouselImages string  `json:"carousel_images"`
+	StudentCount   int     `json:"student_count"`
+	Status         int8    `json:"status"`
 }
 
 type courseStatusRequest struct {
@@ -126,6 +128,12 @@ func CreateCourse(c *gin.Context) {
 	}
 	if hasColumn(columnTypes, "description") {
 		insertData["description"] = req.Desc
+	}
+	if hasColumn(columnTypes, "detail_content") {
+		insertData["detail_content"] = req.DetailContent
+	}
+	if hasColumn(columnTypes, "carousel_images") {
+		insertData["carousel_images"] = req.CarouselImages
 	}
 	if hasColumn(columnTypes, "student_count") {
 		insertData["student_count"] = req.StudentCount
@@ -189,6 +197,12 @@ func UpdateCourse(c *gin.Context) {
 	}
 	if hasColumn(columnTypes, "description") {
 		updates["description"] = req.Desc
+	}
+	if hasColumn(columnTypes, "detail_content") {
+		updates["detail_content"] = req.DetailContent
+	}
+	if hasColumn(columnTypes, "carousel_images") {
+		updates["carousel_images"] = req.CarouselImages
 	}
 	if hasColumn(columnTypes, "student_count") {
 		updates["student_count"] = req.StudentCount

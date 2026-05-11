@@ -56,6 +56,7 @@ func InitRouter() *gin.Engine {
 			public.GET("/admin/users", AdminGetUsers)
 			public.GET("/admin/courses", AdminGetCourses)
 			public.POST("/admin/courses", CreateCourse)
+			public.POST("/admin/courses/upload-image", AdminUploadCourseImage)
 			public.PUT("/admin/courses/:id", UpdateCourse)
 			public.PATCH("/admin/courses/:id/status", UpdateCourseStatus)
 			public.DELETE("/admin/courses/:id", DeleteCourse)
@@ -137,7 +138,7 @@ func InitRouter() *gin.Engine {
 				rtcGroup.POST("/token", GenerateRTCToken)
 				// 获取直播间状态
 				rtcGroup.GET("/room/status", GetLiveRoomStatus)
-				
+
 				// 连麦相关 (学生/老师通用)
 				rtcGroup.POST("/mic/apply", ApplyMic) // 学生举手
 				rtcGroup.POST("/mic/end", EndMic)     // 结束连麦
@@ -150,14 +151,14 @@ func InitRouter() *gin.Engine {
 				teacherGroup.GET("/my-classes", func(c *gin.Context) {
 					c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "这里是教师专有的班级数据"})
 				})
-				
+
 				// 教师开播、下播
 				teacherGroup.POST("/live/start", StartLive)
 				teacherGroup.POST("/live/end/:id", EndLive)
-				
+
 				// 教师审批连麦
-				teacherGroup.GET("/mic/queue", GetMicQueue)   // 获取举手列表
-				teacherGroup.POST("/mic/handle", HandleMic)   // 同意/拒绝
+				teacherGroup.GET("/mic/queue", GetMicQueue) // 获取举手列表
+				teacherGroup.POST("/mic/handle", HandleMic) // 同意/拒绝
 			}
 
 			// === 仅限管理员操作的接口 ===
