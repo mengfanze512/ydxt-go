@@ -136,6 +136,12 @@ func CreateCourse(c *gin.Context) {
 		insertData["carousel_images"] = req.CarouselImages
 	}
 	if hasColumn(columnTypes, "student_count") {
+		insertData["detail_content"] = req.DetailContent
+	}
+	if hasColumn(columnTypes, "carousel_images") {
+		insertData["carousel_images"] = req.CarouselImages
+	}
+	if hasColumn(columnTypes, "student_count") {
 		insertData["student_count"] = req.StudentCount
 	}
 	if hasColumn(columnTypes, "sales_count") {
@@ -199,6 +205,12 @@ func UpdateCourse(c *gin.Context) {
 		updates["description"] = req.Desc
 	}
 	if hasColumn(columnTypes, "detail_content") {
+		updates["detail_content"] = req.DetailContent
+	}
+	if hasColumn(columnTypes, "carousel_images") {
+		updates["carousel_images"] = req.CarouselImages
+	}
+	if hasColumn(columnTypes, "student_count") {
 		updates["detail_content"] = req.DetailContent
 	}
 	if hasColumn(columnTypes, "carousel_images") {

@@ -29,6 +29,100 @@ type storageConfig struct {
 	Source       string
 }
 
+func loadStorageConfig() (storageConfig, error) {
+	var cfg storageConfig
+
+	// 方案A：用户显式配置了长期密钥（不带Token）
+	if os.Getenv("COS_SECRET_ID") != "" && os.Getenv("COS_SECRET_KEY") != "" {
+		cfg.SecretID = os.Getenv("COS_SECRET_ID")
+		cfg.SecretKey = os.Getenv("COS_SECRET_KEY")
+		cfg.SessionToken = os.Getenv("COS_SESSION_TOKEN") // 长期密钥通常为空
+		cfg.Bucket = os.Getenv("COS_BUCKET")
+		cfg.Region = os.Getenv("COS_REGION")
+		cfg.AppID = os.Getenv("COS_APP_ID")
+		cfg.Source = "explicit-cos-env"
+	} else {
+		// 方案B：微信云托管上下文自动注入的临时密钥
+		cfg.SecretID = firstNonEmpty("TENCENTCLOUD_SECRETID", "SECRETID")
+		cfg.SecretKey = firstNonEmpty("TENCENTCLOUD_SECRETKEY", "SECRETKEY")
+		cfg.SessionToken = firstNonEmpty("TENCENTCLOUD_SESSIONTOKEN", "SESSIONTOKEN", "TOKEN")
+		cfg.Bucket = firstNonEmpty("TCB_STORAGE_BUCKET")
+		cfg.Region = firstNonEmpty("TCB_REGION", "REGION")
+		cfg.AppID = firstNonEmpty("TCB_APPID", "APPID")
+		cfg.Source = "wxcloud-context-env"
+	}
+
+	// 再从微信云托管上下文补齐（TCB_CONTEXT_CNFG）
+	ctxRaw := os.Getenv("TCB_CONTEXT_CNFG")
+	if ctxRaw != "" {
+		var ctx map[string]interface{}
+		if err := json.Unmarshal([]byte(ctxRaw), &ctx); err == nil {
+			if cfg.Bucket == "" {
+				cfg.Bucket = findValueByKeys(ctx, []string{"cosbucket", "bucket", "storagename", "storagebucket", "defaultbucket"})
+			}
+			if cfg.Region == "" {
+				cfg.Region = findValueByKeys(ctx, []string{"region", "cosregion"})
+			}
+			if cfg.AppID == "" {
+				cfg.AppID = findValueByKeys(ctx, []string{"appid", "uin"})
+			}
+		}
+	}
+
+	// 若 Bucket 未带 appid，则自动拼接（云托管用户常只拿到短桶名）
+	if cfg.Bucket != "" && !strings.Contains(cfg.Bucket, "-") && cfg.AppID != "" {
+		cfg.Bucket = fmt.Sprintf("%s-%s", cfg.Bucket, cfg.AppID)
+	}
+
+	if cfg.SecretID == "" || cfg.SecretKey == "" || cfg.Bucket == "" || cfg.Region == "" {
+		return storageConfig{}, errors.New("缺失存储配置。请检查环境变量 COS_SECRET_ID/KEY/BUCKET/REGION")
+	}
+
+	return cfg, nil
+}
+
+func firstNonEmpty(keys ...string) string {
+	for _, key := range keys {
+		if val := strings.TrimSpace(os.Getenv(key)); val != "" {
+			return val
+		}
+	}
+	return ""
+}
+
+func findValueByKeys(data interface{}, candidates []string) string {
+	normalizedCandidates := map[string]struct{}{}
+	for _, key := range candidates {
+		normalizedCandidates[strings.ToLower(strings.TrimSpace(key))] = struct{}{}
+	}
+
+	var walk func(v interface{}) string
+	walk = func(v interface{}) string {
+		switch node := v.(type) {
+		case map[string]interface{}:
+			for key, val := range node {
+				k := strings.ToLower(strings.TrimSpace(key))
+				if _, ok := normalizedCandidates[k]; ok {
+					if s, ok := val.(string); ok && strings.TrimSpace(s) != "" {
+						return strings.TrimSpace(s)
+					}
+				}
+				if nested := walk(val); nested != "" {
+					return nested
+				}
+			}
+		case []interface{}:
+			for _, item := range node {
+				if nested := walk(item); nested != "" {
+					return nested
+				}
+			}
+		}
+		return ""
+	}
+	return walk(data)
+}
+
 // AdminUploadCourseImage 管理端上传课程图片到对象存储 courses_images 目录
 func AdminUploadCourseImage(c *gin.Context) {
 	fileHeader, err := c.FormFile("file")
@@ -106,7 +200,7 @@ func AdminUploadCourseImage(c *gin.Context) {
 	if _, err = cosClient.Object.Put(context.Background(), objectKey, file, nil); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code": 500,
-			"msg":  fmt.Sprintf("上传对象存储失败: %v", err),
+			"msg":  fmt.Sprintf("上传失败[%s]: %v", cfg.Source, err),
 		})
 		return
 	}
@@ -121,101 +215,4 @@ func AdminUploadCourseImage(c *gin.Context) {
 			"source": cfg.Source,
 		},
 	})
-}
-
-func loadStorageConfig() (storageConfig, error) {
-	// 优先兼容显式配置（本地开发/手动配置）
-	cfg := storageConfig{
-		SecretID:     firstNonEmpty("COS_SECRET_ID", "TENCENTCLOUD_SECRETID", "SECRETID"),
-		SecretKey:    firstNonEmpty("COS_SECRET_KEY", "TENCENTCLOUD_SECRETKEY", "SECRETKEY"),
-		SessionToken: firstNonEmpty("COS_SESSION_TOKEN", "TENCENTCLOUD_SESSIONTOKEN", "SESSIONTOKEN", "TOKEN"),
-		Bucket:       firstNonEmpty("COS_BUCKET", "TCB_STORAGE_BUCKET"),
-		Region:       firstNonEmpty("COS_REGION", "TCB_REGION", "REGION"),
-		AppID:        firstNonEmpty("COS_APP_ID", "TCB_APPID", "APPID"),
-	}
-
-	// 再从微信云托管上下文补齐（TCB_CONTEXT_CNFG）
-	ctxRaw := os.Getenv("TCB_CONTEXT_CNFG")
-	if ctxRaw != "" {
-		var ctx map[string]interface{}
-		if err := json.Unmarshal([]byte(ctxRaw), &ctx); err == nil {
-			if cfg.Bucket == "" {
-				cfg.Bucket = findValueByKeys(ctx, []string{
-					"cosbucket", "bucket", "storagename", "storagebucket", "defaultbucket",
-				})
-			}
-			if cfg.Region == "" {
-				cfg.Region = findValueByKeys(ctx, []string{
-					"region", "cosregion",
-				})
-			}
-			if cfg.AppID == "" {
-				cfg.AppID = findValueByKeys(ctx, []string{
-					"appid", "uin",
-				})
-			}
-		}
-	}
-
-	// 若 Bucket 未带 appid，则自动拼接（云托管用户常只拿到短桶名）
-	if cfg.Bucket != "" && !strings.Contains(cfg.Bucket, "-") && cfg.AppID != "" {
-		cfg.Bucket = fmt.Sprintf("%s-%s", cfg.Bucket, cfg.AppID)
-	}
-
-	if cfg.SecretID == "" || cfg.SecretKey == "" || cfg.Bucket == "" || cfg.Region == "" {
-		return storageConfig{}, errors.New(
-			"请在云托管环境确保可读取到密钥与桶信息（建议提供 COS_SECRET_ID/COS_SECRET_KEY/COS_BUCKET/COS_REGION，或注入 TENCENTCLOUD_SECRETID/TENCENTCLOUD_SECRETKEY/TCB_CONTEXT_CNFG）",
-		)
-	}
-
-	if os.Getenv("COS_SECRET_ID") != "" || os.Getenv("COS_BUCKET") != "" {
-		cfg.Source = "explicit-cos-env"
-	} else if os.Getenv("TCB_CONTEXT_CNFG") != "" {
-		cfg.Source = "wxcloud-context-env"
-	} else {
-		cfg.Source = "runtime-env"
-	}
-	return cfg, nil
-}
-
-func firstNonEmpty(keys ...string) string {
-	for _, key := range keys {
-		if val := strings.TrimSpace(os.Getenv(key)); val != "" {
-			return val
-		}
-	}
-	return ""
-}
-
-func findValueByKeys(data interface{}, candidates []string) string {
-	normalizedCandidates := map[string]struct{}{}
-	for _, key := range candidates {
-		normalizedCandidates[strings.ToLower(strings.TrimSpace(key))] = struct{}{}
-	}
-
-	var walk func(v interface{}) string
-	walk = func(v interface{}) string {
-		switch node := v.(type) {
-		case map[string]interface{}:
-			for key, val := range node {
-				k := strings.ToLower(strings.TrimSpace(key))
-				if _, ok := normalizedCandidates[k]; ok {
-					if s, ok := val.(string); ok && strings.TrimSpace(s) != "" {
-						return strings.TrimSpace(s)
-					}
-				}
-				if nested := walk(val); nested != "" {
-					return nested
-				}
-			}
-		case []interface{}:
-			for _, item := range node {
-				if nested := walk(item); nested != "" {
-					return nested
-				}
-			}
-		}
-		return ""
-	}
-	return walk(data)
 }
