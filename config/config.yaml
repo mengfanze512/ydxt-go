@@ -5,12 +5,12 @@ server:
 
 database:
   # 这里的 DSN 只是本地兜底用，线上会优先读取云托管的环境变量
-  dsn: "root:123456@tcp(127.0.0.1:3306)/yuedi_edu?charset=utf8mb4&parseTime=True&loc=Local"
+  dsn: "root:123456@tcp(127.0.0.1:3306)/yuedi?charset=utf8mb4&parseTime=True&loc=Local"
   max_idle_conns: 10
   max_open_conns: 100
 
 jwt:
-  secret: "yuedi_edu_super_secret_key_2026"
+  secret: "yuedi_super_secret_key_2026"
   expire_hours: 72
 
 wechat:

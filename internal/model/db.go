@@ -35,7 +35,7 @@ func InitDB() {
 
 	if envMySQLAddr != "" {
 		// 云托管环境，覆盖本地配置
-		dsn = fmt.Sprintf("%s:%s@tcp(%s)/yuedi_edu?charset=utf8mb4&parseTime=True&loc=Local",
+		dsn = fmt.Sprintf("%s:%s@tcp(%s)/yuedi?charset=utf8mb4&parseTime=True&loc=Local",
 			envMySQLUser, envMySQLPass, envMySQLAddr)
 		log.Println("Detected WeChat Cloud Hosting Environment. Using injected MYSQL_ADDRESS.")
 	} else {
