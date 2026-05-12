@@ -55,6 +55,9 @@ func GetCourseChapters(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if _, ok := ensureCoursePermission(c, courseID); !ok {
+		return
+	}
 	var chapters []model.CourseChapter
 	if err := model.DB.Where("course_id = ?", courseID).Order("sort_order asc, id asc").Find(&chapters).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取章节失败"})
@@ -71,6 +74,9 @@ func CreateCourseChapter(c *gin.Context) {
 	}
 	courseID, ok := parseUint(c, "course_id")
 	if !ok {
+		return
+	}
+	if _, ok := ensureCoursePermission(c, courseID); !ok {
 		return
 	}
 	var req chapterRequest
@@ -98,6 +104,14 @@ func UpdateCourseChapter(c *gin.Context) {
 	}
 	chapterID, ok := parseUint(c, "id")
 	if !ok {
+		return
+	}
+	var chapter model.CourseChapter
+	if err := model.DB.Where("id = ?", chapterID).First(&chapter).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "章节不存在"})
+		return
+	}
+	if _, ok := ensureCoursePermission(c, chapter.CourseID); !ok {
 		return
 	}
 	var req chapterRequest
@@ -129,6 +143,14 @@ func DeleteCourseChapter(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var chapter model.CourseChapter
+	if err := model.DB.Where("id = ?", chapterID).First(&chapter).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "章节不存在"})
+		return
+	}
+	if _, ok := ensureCoursePermission(c, chapter.CourseID); !ok {
+		return
+	}
 	if err := model.DB.Where("chapter_id = ?", chapterID).Delete(&model.CourseLesson{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除小节失败"})
 		return
@@ -155,6 +177,14 @@ func GetChapterLessons(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var chapter model.CourseChapter
+	if err := model.DB.Where("id = ?", chapterID).First(&chapter).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "章节不存在"})
+		return
+	}
+	if _, ok := ensureCoursePermission(c, chapter.CourseID); !ok {
+		return
+	}
 	var lessons []model.CourseLesson
 	if err := model.DB.Where("chapter_id = ?", chapterID).Order("sort_order asc, id asc").Find(&lessons).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取小节失败"})
@@ -171,6 +201,14 @@ func CreateLesson(c *gin.Context) {
 	}
 	chapterID, ok := parseUint(c, "chapter_id")
 	if !ok {
+		return
+	}
+	var chapter model.CourseChapter
+	if err := model.DB.Where("id = ?", chapterID).First(&chapter).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "章节不存在"})
+		return
+	}
+	if _, ok := ensureCoursePermission(c, chapter.CourseID); !ok {
 		return
 	}
 	var req lessonRequest
@@ -207,6 +245,19 @@ func UpdateLesson(c *gin.Context) {
 	}
 	lessonID, ok := parseUint(c, "id")
 	if !ok {
+		return
+	}
+	var lesson model.CourseLesson
+	if err := model.DB.Where("id = ?", lessonID).First(&lesson).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "小节不存在"})
+		return
+	}
+	var chapter model.CourseChapter
+	if err := model.DB.Where("id = ?", lesson.ChapterID).First(&chapter).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "章节不存在"})
+		return
+	}
+	if _, ok := ensureCoursePermission(c, chapter.CourseID); !ok {
 		return
 	}
 	var req lessonRequest
@@ -247,6 +298,19 @@ func DeleteLesson(c *gin.Context) {
 	}
 	lessonID, ok := parseUint(c, "id")
 	if !ok {
+		return
+	}
+	var lesson model.CourseLesson
+	if err := model.DB.Where("id = ?", lessonID).First(&lesson).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "小节不存在"})
+		return
+	}
+	var chapter model.CourseChapter
+	if err := model.DB.Where("id = ?", lesson.ChapterID).First(&chapter).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "章节不存在"})
+		return
+	}
+	if _, ok := ensureCoursePermission(c, chapter.CourseID); !ok {
 		return
 	}
 	result := model.DB.Where("id = ?", lessonID).Delete(&model.CourseLesson{})

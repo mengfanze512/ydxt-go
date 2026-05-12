@@ -36,6 +36,9 @@ func JWTAuth() gin.HandlerFunc {
 		// 将当前请求的 userID 和 role 信息保存到请求的上下文 c 上
 		c.Set("userID", claims.UserID)
 		c.Set("role", claims.Role)
+		c.Set("accountType", claims.AccountType)
+		c.Set("roleCode", claims.RoleCode)
+		c.Set("teacherID", claims.TeacherID)
 
 		c.Next()
 	}

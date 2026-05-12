@@ -8,16 +8,22 @@ import (
 )
 
 type CustomClaims struct {
-	UserID uint64 `json:"user_id"`
-	Role   int8   `json:"role"`
+	UserID      uint64 `json:"user_id"`
+	Role        int8   `json:"role"`
+	AccountType string `json:"account_type"`
+	RoleCode    string `json:"role_code"`
+	TeacherID   uint64 `json:"teacher_id"`
 	jwt.RegisteredClaims
 }
 
 // GenerateToken 生成 JWT Token
-func GenerateToken(userID uint64, role int8) (string, error) {
+func GenerateToken(userID uint64, role int8, accountType, roleCode string, teacherID uint64) (string, error) {
 	claims := CustomClaims{
-		UserID: userID,
-		Role:   role,
+		UserID:      userID,
+		Role:        role,
+		AccountType: accountType,
+		RoleCode:    roleCode,
+		TeacherID:   teacherID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(config.GlobalConfig.JWT.ExpireHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

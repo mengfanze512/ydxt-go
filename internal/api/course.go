@@ -10,6 +10,42 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func currentTeacherScope(c *gin.Context) (bool, uint64) {
+	accountType, _ := c.Get("accountType")
+	if accountType == accountTypeTeacher {
+		if teacherID, ok := c.Get("teacherID"); ok {
+			if id, okCast := teacherID.(uint64); okCast && id > 0 {
+				return true, id
+			}
+		}
+	}
+	return false, 0
+}
+
+func fillTeacherNames(courses []model.Course) {
+	for i, course := range courses {
+		var teacher model.Teacher
+		if err := model.DB.Where("id = ?", course.TeacherID).First(&teacher).Error; err == nil {
+			courses[i].TeacherName = teacher.Name
+		} else {
+			courses[i].TeacherName = "讲师"
+		}
+	}
+}
+
+func ensureCoursePermission(c *gin.Context, courseID uint64) (*model.Course, bool) {
+	var course model.Course
+	if err := model.DB.Where("id = ?", courseID).First(&course).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "课程不存在"})
+		return nil, false
+	}
+	if isTeacher, teacherID := currentTeacherScope(c); isTeacher && course.TeacherID != teacherID {
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": "只能操作自己的课程"})
+		return nil, false
+	}
+	return &course, true
+}
+
 // GetCourseList 获取公开课程列表 (支持前台分页和分类)
 func GetCourseList(c *gin.Context) {
 	if model.DB == nil {
@@ -35,14 +71,7 @@ func GetCourseList(c *gin.Context) {
 	}
 
 	// 为前台组装讲师名字(简单处理，实际应联表查询)
-	for i, course := range courses {
-		var teacher model.User
-		if err := model.DB.Where("id = ?", course.TeacherID).First(&teacher).Error; err == nil {
-			courses[i].TeacherName = teacher.Nickname
-		} else {
-			courses[i].TeacherName = "特邀讲师"
-		}
-	}
+	fillTeacherNames(courses)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
@@ -65,9 +94,9 @@ func GetCourseDetail(c *gin.Context) {
 		return
 	}
 
-	var teacher model.User
+	var teacher model.Teacher
 	if err := model.DB.Where("id = ?", course.TeacherID).First(&teacher).Error; err == nil {
-		course.TeacherName = teacher.Nickname
+		course.TeacherName = teacher.Name
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": course})
@@ -102,6 +131,9 @@ func CreateCourse(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
 		return
+	}
+	if isTeacher, teacherID := currentTeacherScope(c); isTeacher {
+		req.TeacherID = teacherID
 	}
 
 	columnTypes := getCourseColumnTypes()
@@ -174,10 +206,17 @@ func UpdateCourse(c *gin.Context) {
 		return
 	}
 
+	if _, ok := ensureCoursePermission(c, id); !ok {
+		return
+	}
+
 	var req courseUpsertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
 		return
+	}
+	if isTeacher, teacherID := currentTeacherScope(c); isTeacher {
+		req.TeacherID = teacherID
 	}
 
 	columnTypes := getCourseColumnTypes()
@@ -262,6 +301,9 @@ func UpdateCourseStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
 		return
 	}
+	if _, ok := ensureCoursePermission(c, id); !ok {
+		return
+	}
 
 	result := model.DB.Model(&model.Course{}).Where("id = ?", id).Update("status", req.Status)
 	if result.Error != nil {
@@ -286,6 +328,10 @@ func DeleteCourse(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "课程ID无效"})
+		return
+	}
+
+	if _, ok := ensureCoursePermission(c, id); !ok {
 		return
 	}
 

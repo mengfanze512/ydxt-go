@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"net/http"
+	"time"
 	"ydxt-go/internal/config"
 	"ydxt-go/internal/model"
 	"ydxt-go/internal/utils"
@@ -31,6 +32,36 @@ type ChangePwdRequest struct {
 	NewPassword string `json:"new_password" binding:"required"`
 }
 
+const (
+	accountTypeStudent = "student"
+	accountTypeAdmin   = "admin"
+	accountTypeTeacher = "teacher"
+)
+
+type loginUserPayload struct {
+	ID          uint64 `json:"id"`
+	Username    string `json:"username,omitempty"`
+	Phone       string `json:"phone,omitempty"`
+	Nickname    string `json:"nickname"`
+	Name        string `json:"name,omitempty"`
+	Avatar      string `json:"avatar,omitempty"`
+	Role        int8   `json:"role"`
+	AccountType string `json:"account_type"`
+	RoleCode    string `json:"role_code"`
+	TeacherID   uint64 `json:"teacher_id"`
+}
+
+func makeLoginResponse(token string, user loginUserPayload) gin.H {
+	return gin.H{
+		"code": 0,
+		"msg":  "登录成功",
+		"data": gin.H{
+			"token": token,
+			"user":  user,
+		},
+	}
+}
+
 // ChangePassword 修改密码
 func ChangePassword(c *gin.Context) {
 	var req ChangePwdRequest
@@ -44,24 +75,53 @@ func ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "未登录"})
 		return
 	}
+	accountType, _ := c.Get("accountType")
 
-	var user model.User
-	if err := model.DB.First(&user, userID).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "用户不存在"})
-		return
-	}
-
-	// 验证旧密码
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.OldPassword)); err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "原密码错误"})
-		return
-	}
-
-	// 加密新密码并更新
 	hashedPwd, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-	if err := model.DB.Model(&user).Update("password", string(hashedPwd)).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "密码修改失败"})
-		return
+
+	switch accountType {
+	case accountTypeAdmin:
+		var admin model.Admin
+		if err := model.DB.First(&admin, userID).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "管理员不存在"})
+			return
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(req.OldPassword)); err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "原密码错误"})
+			return
+		}
+		if err := model.DB.Model(&admin).Update("password_hash", string(hashedPwd)).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "密码修改失败"})
+			return
+		}
+	case accountTypeTeacher:
+		var teacher model.Teacher
+		if err := model.DB.First(&teacher, userID).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "讲师不存在"})
+			return
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(teacher.PasswordHash), []byte(req.OldPassword)); err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "原密码错误"})
+			return
+		}
+		if err := model.DB.Model(&teacher).Update("password_hash", string(hashedPwd)).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "密码修改失败"})
+			return
+		}
+	default:
+		var user model.User
+		if err := model.DB.First(&user, userID).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "用户不存在"})
+			return
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.OldPassword)); err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "原密码错误"})
+			return
+		}
+		if err := model.DB.Model(&user).Update("password", string(hashedPwd)).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "密码修改失败"})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "密码修改成功"})
@@ -77,7 +137,7 @@ func PhoneLogin(c *gin.Context) {
 
 	var user model.User
 	result := model.DB.Where("phone = ?", req.Phone).First(&user)
-	
+
 	if result.Error != nil {
 		// 找不到用户：如果是验证码登录或者测试密码登录，自动注册该用户
 		if req.Code == "123456" || req.Password == "123456" {
@@ -117,26 +177,22 @@ func PhoneLogin(c *gin.Context) {
 	}
 
 	// 登录成功，生成 Token
-	token, err := utils.GenerateToken(user.ID, user.Role)
+	token, err := utils.GenerateToken(user.ID, user.Role, accountTypeStudent, "", 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"msg":  "登录成功",
-		"data": gin.H{
-			"token": token,
-			"user": gin.H{
-				"id":       user.ID,
-				"phone":    user.Phone,
-				"nickname": user.Nickname,
-				"avatar":   user.Avatar,
-				"role":     user.Role,
-			},
-		},
-	})
+	c.JSON(http.StatusOK, makeLoginResponse(token, loginUserPayload{
+		ID:          user.ID,
+		Phone:       user.Phone,
+		Nickname:    user.Nickname,
+		Avatar:      user.Avatar,
+		Role:        user.Role,
+		AccountType: accountTypeStudent,
+		RoleCode:    "",
+		TeacherID:   0,
+	}))
 }
 
 type AdminLoginRequest struct {
@@ -152,63 +208,102 @@ func AdminLogin(c *gin.Context) {
 		return
 	}
 
-	var user model.User
-	// 这里用 Phone 字段暂代 Username
-	result := model.DB.Where("phone = ?", req.Username).First(&user)
-	if result.Error != nil {
-		// 为了测试方便，如果查不到账号且账号是 admin，则自动创建超级管理员
-		if req.Username == "admin" && req.Password == "123456" {
-			hashedPwd, _ := bcrypt.GenerateFromPassword([]byte("123456"), bcrypt.DefaultCost)
-			user = model.User{
-				Phone:    "admin",
-				OpenID:   "admin_dummy_openid", // openid 在数据库是必填项，所以填一个默认值
-				Password: string(hashedPwd),
-				Role:     9,
-				Status:   1,
-				Nickname: "超级管理员",
-			}
-			if err := model.DB.Create(&user).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建管理员账号失败: " + err.Error()})
-				return
-			}
-		} else {
+	var admin model.Admin
+	adminResult := model.DB.Where("username = ?", req.Username).First(&admin)
+	if adminResult.Error == nil {
+		if admin.Status != 1 {
+			c.JSON(http.StatusOK, gin.H{"code": 403, "msg": "账号已被禁用"})
+			return
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(req.Password)); err != nil {
 			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户名或密码错误"})
 			return
 		}
-	} else {
-		// 校验密码
-		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		now := time.Now()
+		_ = model.DB.Model(&admin).Update("last_login_at", &now).Error
+		token, err := utils.GenerateToken(admin.ID, 9, accountTypeAdmin, admin.RoleCode, 0)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
+			return
+		}
+		c.JSON(http.StatusOK, makeLoginResponse(token, loginUserPayload{
+			ID:          admin.ID,
+			Username:    admin.Username,
+			Nickname:    admin.Name,
+			Name:        admin.Name,
+			Role:        9,
+			AccountType: accountTypeAdmin,
+			RoleCode:    admin.RoleCode,
+			TeacherID:   0,
+		}))
+		return
+	}
+
+	var teacher model.Teacher
+	teacherResult := model.DB.Where("username = ?", req.Username).First(&teacher)
+	if teacherResult.Error == nil {
+		if teacher.Status != 1 {
+			c.JSON(http.StatusOK, gin.H{"code": 403, "msg": "账号已被禁用"})
+			return
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(teacher.PasswordHash), []byte(req.Password)); err != nil {
 			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户名或密码错误"})
 			return
 		}
-	}
-
-	// 校验权限 (只有 role=9 管理员能登录后台)
-	if user.Role != 9 {
-		c.JSON(http.StatusOK, gin.H{"code": 403, "msg": "无权限登录管理后台"})
+		now := time.Now()
+		_ = model.DB.Model(&teacher).Update("last_login_at", &now).Error
+		token, err := utils.GenerateToken(teacher.ID, 2, accountTypeTeacher, accountTypeTeacher, teacher.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
+			return
+		}
+		c.JSON(http.StatusOK, makeLoginResponse(token, loginUserPayload{
+			ID:          teacher.ID,
+			Username:    teacher.Username,
+			Nickname:    teacher.Name,
+			Name:        teacher.Name,
+			Avatar:      teacher.Avatar,
+			Role:        2,
+			AccountType: accountTypeTeacher,
+			RoleCode:    accountTypeTeacher,
+			TeacherID:   teacher.ID,
+		}))
 		return
 	}
 
-	token, err := utils.GenerateToken(user.ID, user.Role)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
+	// 兼容旧库: 第一次部署仍允许 admin/123456 自动生成超级管理员
+	if req.Username == "admin" && req.Password == "123456" {
+		hashedPwd, _ := bcrypt.GenerateFromPassword([]byte("123456"), bcrypt.DefaultCost)
+		admin = model.Admin{
+			Username:     "admin",
+			PasswordHash: string(hashedPwd),
+			Name:         "超级管理员",
+			RoleCode:     model.AdminRoleSuper,
+			Status:       1,
+		}
+		if err := model.DB.Create(&admin).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建管理员账号失败: " + err.Error()})
+			return
+		}
+		token, err := utils.GenerateToken(admin.ID, 9, accountTypeAdmin, admin.RoleCode, 0)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
+			return
+		}
+		c.JSON(http.StatusOK, makeLoginResponse(token, loginUserPayload{
+			ID:          admin.ID,
+			Username:    admin.Username,
+			Nickname:    admin.Name,
+			Name:        admin.Name,
+			Role:        9,
+			AccountType: accountTypeAdmin,
+			RoleCode:    admin.RoleCode,
+			TeacherID:   0,
+		}))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"msg":  "登录成功",
-		"data": gin.H{
-			"token": token,
-			"user": gin.H{
-				"id":       user.ID,
-				"username": user.Phone,
-				"nickname": user.Nickname,
-				"avatar":   user.Avatar,
-				"role":     user.Role,
-			},
-		},
-	})
+	c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户名或密码错误"})
 }
 
 // WxLogin 微信小程序静默登录
@@ -267,10 +362,10 @@ func WxLogin(c *gin.Context) {
 	if result.Error != nil {
 		// 查不到，自动注册新用户
 		user = model.User{
-			Phone:  phone,
-			OpenID: session.OpenID,
-			Role:   1, // 默认学员
-			Status: 1,
+			Phone:    phone,
+			OpenID:   session.OpenID,
+			Role:     1, // 默认学员
+			Status:   1,
 			Nickname: "微信用户",
 		}
 		if phone != "" {
@@ -290,24 +385,20 @@ func WxLogin(c *gin.Context) {
 	}
 
 	// 5. 为该用户生成 JWT Token
-	token, err := utils.GenerateToken(user.ID, user.Role)
+	token, err := utils.GenerateToken(user.ID, user.Role, accountTypeStudent, "", 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"msg":  "登录成功",
-		"data": gin.H{
-			"token": token,
-			"user": gin.H{
-				"id":       user.ID,
-				"phone":    user.Phone,
-				"nickname": user.Nickname,
-				"avatar":   user.Avatar,
-				"role":     user.Role,
-			},
-		},
-	})
+	c.JSON(http.StatusOK, makeLoginResponse(token, loginUserPayload{
+		ID:          user.ID,
+		Phone:       user.Phone,
+		Nickname:    user.Nickname,
+		Avatar:      user.Avatar,
+		Role:        user.Role,
+		AccountType: accountTypeStudent,
+		RoleCode:    "",
+		TeacherID:   0,
+	}))
 }

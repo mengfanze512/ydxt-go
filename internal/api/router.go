@@ -50,24 +50,6 @@ func InitRouter() *gin.Engine {
 			// 管理后台登录
 			public.POST("/admin/login", AdminLogin)
 
-			// 让管理后台也能在未登录/登录态下拿到一些公开的列表数据 (避免由于 middleware.RoleAuth 导致的 401 误判)
-			// 注意: 实际生产中 admin 接口应当在 auth 组中，这里为解决连通性错误暂时暴露部分或优化权限逻辑
-			public.GET("/admin/orders", GetOrderList)
-			public.GET("/admin/users", AdminGetUsers)
-			public.GET("/admin/courses", AdminGetCourses)
-			public.POST("/admin/courses", CreateCourse)
-			public.POST("/admin/courses/upload-image", AdminUploadCourseImage)
-			public.PUT("/admin/courses/:id", UpdateCourse)
-			public.PATCH("/admin/courses/:id/status", UpdateCourseStatus)
-			public.DELETE("/admin/courses/:id", DeleteCourse)
-			public.GET("/admin/courses/:course_id/chapters", GetCourseChapters)
-			public.POST("/admin/courses/:course_id/chapters", CreateCourseChapter)
-			public.PUT("/admin/chapters/:id", UpdateCourseChapter)
-			public.DELETE("/admin/chapters/:id", DeleteCourseChapter)
-			public.GET("/admin/chapters/:chapter_id/lessons", GetChapterLessons)
-			public.POST("/admin/chapters/:chapter_id/lessons", CreateLesson)
-			public.PUT("/admin/lessons/:id", UpdateLesson)
-			public.DELETE("/admin/lessons/:id", DeleteLesson)
 			public.GET("/admin/learning/tasks", GetLearningTasks)
 			public.GET("/admin/learning/tasks/:id", GetLearningTaskDetail)
 			public.POST("/admin/learning/tasks", CreateLearningTask)
@@ -125,7 +107,10 @@ func InitRouter() *gin.Engine {
 				userGroup.GET("/profile", func(c *gin.Context) {
 					userID, _ := c.Get("userID")
 					role, _ := c.Get("role")
-					c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": gin.H{"user_id": userID, "role": role}})
+					accountType, _ := c.Get("accountType")
+					roleCode, _ := c.Get("roleCode")
+					teacherID, _ := c.Get("teacherID")
+					c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": gin.H{"user_id": userID, "role": role, "account_type": accountType, "role_code": roleCode, "teacher_id": teacherID}})
 				})
 				// 修改密码
 				userGroup.POST("/change-password", ChangePassword)
@@ -165,8 +150,35 @@ func InitRouter() *gin.Engine {
 			adminGroup := auth.Group("/admin")
 			adminGroup.Use(middleware.RoleAuth(9)) // 仅允许管理员访问
 			{
+				adminGroup.GET("/teachers", GetTeacherList)
+				adminGroup.POST("/teachers", CreateTeacher)
+				adminGroup.PUT("/teachers/:id", UpdateTeacher)
+				adminGroup.GET("/admins", GetAdminList)
+				adminGroup.POST("/admins", CreateAdmin)
+				adminGroup.PUT("/admins/:id", UpdateAdmin)
 				// 注意: /api/v1/admin/community/posts 与 /api/v1/admin/practice/records
 				// 已在 public 组注册，这里不能重复注册，否则 Gin 启动会 panic。
+			}
+
+			courseManageGroup := auth.Group("/admin")
+			courseManageGroup.Use(middleware.RoleAuth(2, 9))
+			{
+				courseManageGroup.GET("/users", AdminGetUsers)
+				courseManageGroup.GET("/orders", GetOrderList)
+				courseManageGroup.GET("/courses", AdminGetCourses)
+				courseManageGroup.POST("/courses", CreateCourse)
+				courseManageGroup.POST("/courses/upload-image", AdminUploadCourseImage)
+				courseManageGroup.PUT("/courses/:id", UpdateCourse)
+				courseManageGroup.PATCH("/courses/:id/status", UpdateCourseStatus)
+				courseManageGroup.DELETE("/courses/:id", DeleteCourse)
+				courseManageGroup.GET("/courses/:course_id/chapters", GetCourseChapters)
+				courseManageGroup.POST("/courses/:course_id/chapters", CreateCourseChapter)
+				courseManageGroup.PUT("/chapters/:id", UpdateCourseChapter)
+				courseManageGroup.DELETE("/chapters/:id", DeleteCourseChapter)
+				courseManageGroup.GET("/chapters/:chapter_id/lessons", GetChapterLessons)
+				courseManageGroup.POST("/chapters/:chapter_id/lessons", CreateLesson)
+				courseManageGroup.PUT("/lessons/:id", UpdateLesson)
+				courseManageGroup.DELETE("/lessons/:id", DeleteLesson)
 			}
 		}
 	}
