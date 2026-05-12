@@ -26,32 +26,71 @@ func GetOrderList(c *gin.Context) {
 		return
 	}
 
-	var orders []adminOrderListItem
-	query := model.DB.Table("orders o").
-		Select(`
-			o.id,
-			o.order_no,
-			COALESCE(u.nickname, '') as user,
-			COALESCE(u.phone, '') as phone,
-			COALESCE(MAX(oi.goods_name), '') as goods_name,
-			o.pay_amount as amount,
-			o.type,
-			o.status,
-			DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') as create_time
-		`).
-		Joins("LEFT JOIN users u ON u.id = o.user_id").
-		Joins("LEFT JOIN order_items oi ON oi.order_id = o.id")
+	query := model.DB.Model(&model.Order{})
 	if isTeacher, teacherID := currentTeacherScope(c); isTeacher {
-		query = query.Joins("JOIN courses c ON c.id = oi.goods_id AND o.type = 'course'").
+		subQuery := model.DB.Table("order_items oi").
+			Select("DISTINCT oi.order_id").
+			Joins("JOIN courses c ON c.id = oi.goods_id").
+			Joins("JOIN orders o ON o.id = oi.order_id").
+			Where("o.type = ?", "course").
 			Where("c.teacher_id = ?", teacherID)
+		query = query.Where("id IN (?)", subQuery)
 	}
-	if err := query.
-		Group("o.id, o.order_no, u.nickname, u.phone, o.pay_amount, o.type, o.status, o.created_at").
-		Order("o.created_at desc").
-		Scan(&orders).Error; err != nil {
+
+	var orderRows []model.Order
+	if err := query.Order("created_at desc").Find(&orderRows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取订单失败"})
 		return
 	}
+
+	if len(orderRows) == 0 {
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": []adminOrderListItem{}})
+		return
+	}
+
+	orderIDs := make([]uint64, 0, len(orderRows))
+	userIDs := make([]uint64, 0, len(orderRows))
+	for _, order := range orderRows {
+		orderIDs = append(orderIDs, order.ID)
+		userIDs = append(userIDs, order.UserID)
+	}
+
+	var users []model.User
+	userMap := make(map[uint64]model.User)
+	if err := model.DB.Where("id IN ?", userIDs).Find(&users).Error; err == nil {
+		for _, user := range users {
+			userMap[user.ID] = user
+		}
+	}
+
+	var orderItems []model.OrderItem
+	itemMap := make(map[uint64][]model.OrderItem)
+	if err := model.DB.Where("order_id IN ?", orderIDs).Order("id asc").Find(&orderItems).Error; err == nil {
+		for _, item := range orderItems {
+			itemMap[item.OrderID] = append(itemMap[item.OrderID], item)
+		}
+	}
+
+	orders := make([]adminOrderListItem, 0, len(orderRows))
+	for _, order := range orderRows {
+		user := userMap[order.UserID]
+		goodsName := ""
+		if items, ok := itemMap[order.ID]; ok && len(items) > 0 {
+			goodsName = items[0].GoodsName
+		}
+		orders = append(orders, adminOrderListItem{
+			ID:         order.ID,
+			OrderNo:    order.OrderNo,
+			User:       user.Nickname,
+			Phone:      user.Phone,
+			GoodsName:  goodsName,
+			Amount:     order.PayAmount,
+			Type:       order.Type,
+			Status:     order.Status,
+			CreateTime: order.CreatedAt.Format("2006-01-02 15:04:05"),
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"msg":  "success",
