@@ -14,6 +14,7 @@ import (
 	"ydxt-go/internal/utils"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -271,14 +272,27 @@ func WxLogin(c *gin.Context) {
 	var user model.User
 	result := model.DB.Where("openid = ?", session.OpenID).First(&user)
 	if result.Error != nil {
-		// 查不到，自动注册新用户 (默认身份是学生 role=1)
-		user = model.User{
-			OpenID: session.OpenID,
-			Role:   1, 
-			Status: 1,
+		if result.Error != gorm.ErrRecordNotFound {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "查询用户失败: " + result.Error.Error()})
+			return
 		}
-		if err := model.DB.Create(&user).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "自动注册失败"})
+
+		// phone 字段在库里允许为 NULL 且带唯一索引，不能用 Go 字符串零值写成空串。
+		createData := map[string]interface{}{
+			"openid": session.OpenID,
+			"role":   1,
+			"status": 1,
+			"phone":  nil,
+		}
+		if unionID := strings.TrimSpace(session.UnionID); unionID != "" {
+			createData["unionid"] = unionID
+		}
+		if err := model.DB.Model(&model.User{}).Create(createData).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "自动注册失败: " + err.Error()})
+			return
+		}
+		if err := model.DB.Where("openid = ?", session.OpenID).First(&user).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "注册成功但查询用户失败: " + err.Error()})
 			return
 		}
 	}
