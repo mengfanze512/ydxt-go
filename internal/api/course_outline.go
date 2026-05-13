@@ -25,13 +25,19 @@ type lessonRequest struct {
 	SortOrder  int    `json:"sort_order"`
 }
 
-func parseUint(c *gin.Context, key string) (uint64, bool) {
-	v, err := strconv.ParseUint(c.Param(key), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
-		return 0, false
+func parseUint(c *gin.Context, keys ...string) (uint64, bool) {
+	for _, key := range keys {
+		raw := c.Param(key)
+		if raw == "" {
+			continue
+		}
+		v, err := strconv.ParseUint(raw, 10, 64)
+		if err == nil {
+			return v, true
+		}
 	}
-	return v, true
+	c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+	return 0, false
 }
 
 func parseTime(s string) *time.Time {
@@ -51,7 +57,7 @@ func GetCourseChapters(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": []model.CourseChapter{}})
 		return
 	}
-	courseID, ok := parseUint(c, "course_id")
+	courseID, ok := parseUint(c, "id", "course_id")
 	if !ok {
 		return
 	}
@@ -72,7 +78,7 @@ func CreateCourseChapter(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "数据库未连接"})
 		return
 	}
-	courseID, ok := parseUint(c, "course_id")
+	courseID, ok := parseUint(c, "id", "course_id")
 	if !ok {
 		return
 	}
@@ -173,7 +179,7 @@ func GetChapterLessons(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": []model.CourseLesson{}})
 		return
 	}
-	chapterID, ok := parseUint(c, "chapter_id")
+	chapterID, ok := parseUint(c, "id", "chapter_id")
 	if !ok {
 		return
 	}
@@ -199,7 +205,7 @@ func CreateLesson(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "数据库未连接"})
 		return
 	}
-	chapterID, ok := parseUint(c, "chapter_id")
+	chapterID, ok := parseUint(c, "id", "chapter_id")
 	if !ok {
 		return
 	}
