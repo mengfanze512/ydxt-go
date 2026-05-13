@@ -126,9 +126,18 @@ func GetDashboardSummary(c *gin.Context) {
 			Find(&summary.HotCourses).Error
 	}
 
+	normalizeDashboardHotCoursePrices(summary.HotCourses)
+
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"msg":  "success",
 		"data": summary,
 	})
+}
+
+func normalizeDashboardHotCoursePrices(courses []dashboardHotCourse) {
+	priceColumnType := getCoursePriceColumnType()
+	for i := range courses {
+		courses[i].Price = normalizeCoursePriceValue(courses[i].Price, priceColumnType)
+	}
 }

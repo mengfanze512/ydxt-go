@@ -71,6 +71,8 @@ func GetCourseList(c *gin.Context) {
 		return
 	}
 
+	normalizeCoursePrices(courses)
+
 	// 为前台组装讲师名字(简单处理，实际应联表查询)
 	fillTeacherNames(courses)
 
@@ -94,6 +96,8 @@ func GetCourseDetail(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "课程不存在", "data": nil})
 		return
 	}
+
+	normalizeCoursePrice(&course)
 
 	var teacher model.Teacher
 	if err := model.DB.Where("id = ?", course.TeacherID).First(&teacher).Error; err == nil {
@@ -399,6 +403,31 @@ func validateCourseTeacher(teacherID uint64) error {
 		return fmt.Errorf("所选讲师不存在")
 	}
 	return nil
+}
+
+func normalizeCoursePrices(courses []model.Course) {
+	priceColumnType := getCoursePriceColumnType()
+	for i := range courses {
+		courses[i].Price = normalizeCoursePriceValue(courses[i].Price, priceColumnType)
+	}
+}
+
+func normalizeCoursePrice(course *model.Course) {
+	if course == nil {
+		return
+	}
+	course.Price = normalizeCoursePriceValue(course.Price, getCoursePriceColumnType())
+}
+
+func getCoursePriceColumnType() string {
+	return getCourseColumnTypes()["price"]
+}
+
+func normalizeCoursePriceValue(price float64, columnType string) float64 {
+	if strings.Contains(columnType, "int") {
+		return price / 100
+	}
+	return price
 }
 
 func convertPriceValue(price float64, columnType string) interface{} {

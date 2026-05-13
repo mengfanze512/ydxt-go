@@ -280,6 +280,7 @@ func AdminGetCourses(c *gin.Context) {
 		return
 	}
 
+	normalizeCoursePrices(courses)
 	fillTeacherNames(courses)
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": courses})
