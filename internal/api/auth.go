@@ -230,8 +230,7 @@ func WxLogin(c *gin.Context) {
 	session, err := auth.Code2Session(req.Code)
 	if err != nil {
 		log.Printf("Code2Session Error: %v\n", err)
-		// 如果本地测试没配 AppSecret，这里可以做个 mock
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "换取 OpenID 失败，请检查配置"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "换取 OpenID 失败: " + err.Error()})
 		return
 	}
 
