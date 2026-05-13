@@ -2,7 +2,7 @@ package api
 
 import (
 	"net/http"
-	"yuedi_edu/internal/middleware"
+	"ydxt-go/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 )

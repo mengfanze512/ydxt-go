@@ -4,15 +4,23 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"yuedi_edu/internal/config"
-	"yuedi_edu/internal/model"
-	"yuedi_edu/internal/utils"
+	"ydxt-go/internal/config"
+	"ydxt-go/internal/model"
+	"ydxt-go/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/silenceper/wechat/v2"
 	"github.com/silenceper/wechat/v2/cache"
 	miniConfig "github.com/silenceper/wechat/v2/miniprogram/config"
 	"golang.org/x/crypto/bcrypt"
+)
+
+const (
+	accountTypeUser    = "user"
+	accountTypeAdmin   = "admin"
+	accountTypeTeacher = "teacher"
+	roleCodeStudent    = "student"
+	roleCodeTeacher    = "teacher"
 )
 
 type LoginRequest struct {
@@ -101,7 +109,7 @@ func PhoneLogin(c *gin.Context) {
 	}
 
 	// 登录成功，生成 Token
-	token, err := utils.GenerateToken(user.ID, user.Role)
+	token, err := utils.GenerateToken(user.ID, user.Role, accountTypeUser, roleCodeStudent, 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
 		return
@@ -173,7 +181,7 @@ func AdminLogin(c *gin.Context) {
 		return
 	}
 
-	token, err := utils.GenerateToken(user.ID, user.Role)
+	token, err := utils.GenerateToken(user.ID, user.Role, accountTypeAdmin, model.AdminRoleSuper, 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
 		return
@@ -244,7 +252,7 @@ func WxLogin(c *gin.Context) {
 	}
 
 	// 4. 为该用户生成 JWT Token
-	token, err := utils.GenerateToken(user.ID, user.Role)
+	token, err := utils.GenerateToken(user.ID, user.Role, accountTypeUser, roleCodeStudent, 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
 		return
