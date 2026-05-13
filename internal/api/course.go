@@ -108,6 +108,7 @@ type courseUpsertRequest struct {
 	Price          float64 `json:"price"`
 	TeacherID      uint64  `json:"teacher_id"`
 	Category       string  `json:"category"`
+	Difficulty     int     `json:"difficulty"`
 	Level          string  `json:"level"`
 	Desc           string  `json:"description"`
 	DetailContent  string  `json:"detail_content"`
@@ -151,6 +152,9 @@ func CreateCourse(c *gin.Context) {
 	}
 	if hasColumn(columnTypes, "category") {
 		insertData["category"] = convertCategoryValue(req.Category, columnTypes["category"])
+	}
+	if hasColumn(columnTypes, "difficulty") && req.Difficulty > 0 {
+		insertData["difficulty"] = convertDifficultyValue(req.Difficulty, columnTypes["difficulty"])
 	}
 	if hasColumn(columnTypes, "level") {
 		insertData["level"] = req.Level
@@ -233,6 +237,9 @@ func UpdateCourse(c *gin.Context) {
 	}
 	if hasColumn(columnTypes, "category") {
 		updates["category"] = convertCategoryValue(req.Category, columnTypes["category"])
+	}
+	if hasColumn(columnTypes, "difficulty") && req.Difficulty > 0 {
+		updates["difficulty"] = convertDifficultyValue(req.Difficulty, columnTypes["difficulty"])
 	}
 	if hasColumn(columnTypes, "level") {
 		updates["level"] = req.Level
@@ -395,6 +402,24 @@ func convertCategoryValue(category string, columnType string) interface{} {
 		}
 	}
 	return category
+}
+
+func convertDifficultyValue(difficulty int, columnType string) interface{} {
+	if strings.Contains(columnType, "int") {
+		return difficulty
+	}
+	switch difficulty {
+	case 1:
+		return "初学者"
+	case 2:
+		return "有基础"
+	case 3:
+		return "进阶提升"
+	case 4:
+		return "考级提升"
+	default:
+		return ""
+	}
 }
 
 func convertLevelToType(level string) int {
