@@ -23,8 +23,8 @@ RUN GOOS=linux GOARCH=amd64 go build -o server ./cmd/server/main.go
 # 阶段2: 运行阶段 (使用极其轻量的 alpine 镜像)
 FROM alpine:latest
 
-# 安装 tzdata (时区) 和 bash (云托管 initenv.sh 必须)
-RUN apk add --no-cache tzdata bash
+# 安装 tzdata、bash 以及 HTTPS 请求所需的根证书
+RUN apk add --no-cache tzdata bash ca-certificates && update-ca-certificates
 ENV TZ=Asia/Shanghai
 
 WORKDIR /app
