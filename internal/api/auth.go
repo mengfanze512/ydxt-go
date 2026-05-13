@@ -1,17 +1,19 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 	"ydxt-go/internal/config"
 	"ydxt-go/internal/model"
 	"ydxt-go/internal/utils"
 
 	"github.com/gin-gonic/gin"
-	"github.com/silenceper/wechat/v2"
-	"github.com/silenceper/wechat/v2/cache"
-	miniConfig "github.com/silenceper/wechat/v2/miniprogram/config"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -215,22 +217,53 @@ func WxLogin(c *gin.Context) {
 		return
 	}
 
-	// 1. 初始化微信 SDK 配置
-	wc := wechat.NewWechat()
-	memory := cache.NewMemory()
-	cfg := &miniConfig.Config{
-		AppID:     config.GlobalConfig.Wechat.AppID,
-		AppSecret: config.GlobalConfig.Wechat.AppSecret,
-		Cache:     memory,
+	// 1) 用前端传来的 code 换取 openid（直接调用微信接口，避免 SDK 拼接 URL 异常）
+	type code2SessionResp struct {
+		OpenID     string `json:"openid"`
+		SessionKey string `json:"session_key"`
+		UnionID    string `json:"unionid"`
+		ErrCode    int    `json:"errcode"`
+		ErrMsg     string `json:"errmsg"`
 	}
-	mini := wc.GetMiniProgram(cfg)
 
-	// 2. 用前端传来的 code 换取 openid
-	auth := mini.GetAuth()
-	session, err := auth.Code2Session(req.Code)
+	q := url.Values{}
+	q.Set("appid", strings.TrimSpace(config.GlobalConfig.Wechat.AppID))
+	q.Set("secret", strings.TrimSpace(config.GlobalConfig.Wechat.AppSecret))
+	q.Set("js_code", strings.TrimSpace(req.Code))
+	q.Set("grant_type", "authorization_code")
+
+	endpoint := "https://api.weixin.qq.com/sns/jscode2session"
+	fullURL := endpoint + "?" + q.Encode()
+
+	client := &http.Client{Timeout: 4 * time.Second}
+	httpResp, err := client.Get(fullURL)
 	if err != nil {
-		log.Printf("Code2Session Error: %v\n", err)
+		log.Printf("Code2Session HTTP Error: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "换取 OpenID 失败: " + err.Error()})
+		return
+	}
+	defer httpResp.Body.Close()
+
+	body, _ := io.ReadAll(httpResp.Body)
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": 500,
+			"msg":  fmt.Sprintf("换取 OpenID 失败: HTTP %d %s", httpResp.StatusCode, strings.TrimSpace(string(body))),
+		})
+		return
+	}
+
+	var session code2SessionResp
+	if err := json.Unmarshal(body, &session); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "换取 OpenID 失败: 解析微信响应失败"})
+		return
+	}
+	if session.ErrCode != 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": fmt.Sprintf("换取 OpenID 失败: errcode=%d errmsg=%s", session.ErrCode, session.ErrMsg)})
+		return
+	}
+	if strings.TrimSpace(session.OpenID) == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "换取 OpenID 失败: openid 为空"})
 		return
 	}
 
