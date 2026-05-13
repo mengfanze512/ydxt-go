@@ -70,6 +70,66 @@ func InitRouter() *gin.Engine {
 					c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "这里是教师专有的班级数据"})
 				})
 			}
+
+			// 管理后台业务接口
+			adminGroup := auth.Group("/admin")
+			adminGroup.Use(middleware.RoleAuth(2, 9)) // 管理员和讲师都可进入后台，数据范围由业务层再限制
+			{
+				adminGroup.GET("/dashboard/summary", GetDashboardSummary)
+
+				adminGroup.GET("/users", AdminGetUsers)
+
+				adminGroup.GET("/teachers", GetTeacherList)
+				adminGroup.POST("/teachers", CreateTeacher)
+				adminGroup.PUT("/teachers/:id", UpdateTeacher)
+
+				adminGroup.GET("/admins", GetAdminList)
+				adminGroup.POST("/admins", CreateAdmin)
+				adminGroup.PUT("/admins/:id", UpdateAdmin)
+
+				adminGroup.GET("/courses", AdminGetCourses)
+				adminGroup.POST("/courses", CreateCourse)
+				adminGroup.PUT("/courses/:id", UpdateCourse)
+				adminGroup.PATCH("/courses/:id/status", UpdateCourseStatus)
+				adminGroup.DELETE("/courses/:id", DeleteCourse)
+				adminGroup.POST("/courses/upload-image", AdminUploadCourseImage)
+				adminGroup.GET("/courses/:id/chapters", GetCourseChapters)
+				adminGroup.POST("/courses/:id/chapters", CreateCourseChapter)
+
+				adminGroup.PUT("/chapters/:id", UpdateCourseChapter)
+				adminGroup.DELETE("/chapters/:id", DeleteCourseChapter)
+				adminGroup.GET("/chapters/:id/lessons", GetChapterLessons)
+				adminGroup.POST("/chapters/:id/lessons", CreateLesson)
+
+				adminGroup.PUT("/lessons/:id", UpdateLesson)
+				adminGroup.DELETE("/lessons/:id", DeleteLesson)
+
+				adminGroup.GET("/orders", GetOrderList)
+
+				adminGroup.GET("/learning/tasks", GetLearningTasks)
+				adminGroup.POST("/learning/tasks", CreateLearningTask)
+				adminGroup.PUT("/learning/tasks/:id", UpdateLearningTask)
+				adminGroup.DELETE("/learning/tasks/:id", DeleteLearningTask)
+				adminGroup.POST("/learning/tasks/:id/publish", PublishLearningTask)
+				adminGroup.POST("/learning/tasks/:id/close", CloseLearningTask)
+				adminGroup.GET("/learning/tasks/:id/questions", GetTaskQuestions)
+				adminGroup.POST("/learning/tasks/:id/questions", CreateTaskQuestion)
+				adminGroup.PUT("/learning/questions/:id", UpdateTaskQuestion)
+				adminGroup.DELETE("/learning/questions/:id", DeleteTaskQuestion)
+				adminGroup.GET("/learning/tasks/:id/submissions", GetTaskSubmissions)
+
+				adminGroup.GET("/finance/settlements", GetSettlements)
+				adminGroup.GET("/community/posts", GetPosts)
+			}
+
+			// 管理端复用的非 /admin 前缀接口
+			adminCompatGroup := auth.Group("")
+			adminCompatGroup.Use(middleware.RoleAuth(2, 9))
+			{
+				adminCompatGroup.GET("/practice/records", GetPracticeRecords)
+				adminCompatGroup.GET("/shop/goods", GetShopGoods)
+				adminCompatGroup.GET("/sheet-musics", GetSheetMusics)
+			}
 		}
 	}
 
