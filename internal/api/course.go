@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -136,6 +137,10 @@ func CreateCourse(c *gin.Context) {
 	if isTeacher, teacherID := currentTeacherScope(c); isTeacher {
 		req.TeacherID = teacherID
 	}
+	if err := validateCourseTeacher(req.TeacherID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		return
+	}
 
 	columnTypes := getCourseColumnTypes()
 	insertData := map[string]interface{}{}
@@ -190,7 +195,7 @@ func CreateCourse(c *gin.Context) {
 		insertData["status"] = req.Status
 	}
 	if err := model.DB.Table("courses").Create(insertData).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增课程失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增课程失败: " + err.Error()})
 		return
 	}
 
@@ -221,6 +226,10 @@ func UpdateCourse(c *gin.Context) {
 	}
 	if isTeacher, teacherID := currentTeacherScope(c); isTeacher {
 		req.TeacherID = teacherID
+	}
+	if err := validateCourseTeacher(req.TeacherID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		return
 	}
 
 	columnTypes := getCourseColumnTypes()
@@ -277,7 +286,7 @@ func UpdateCourse(c *gin.Context) {
 
 	result := model.DB.Table("courses").Where("id = ?", id).Updates(updates)
 	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新课程失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新课程失败: " + result.Error.Error()})
 		return
 	}
 	if result.RowsAffected == 0 {
@@ -378,6 +387,20 @@ func hasColumn(columnTypes map[string]string, name string) bool {
 	return ok
 }
 
+func validateCourseTeacher(teacherID uint64) error {
+	if teacherID == 0 {
+		return fmt.Errorf("请选择讲师")
+	}
+	var count int64
+	if err := model.DB.Model(&model.Teacher{}).Where("id = ?", teacherID).Count(&count).Error; err != nil {
+		return fmt.Errorf("校验讲师失败: %w", err)
+	}
+	if count == 0 {
+		return fmt.Errorf("所选讲师不存在")
+	}
+	return nil
+}
+
 func convertPriceValue(price float64, columnType string) interface{} {
 	if strings.Contains(columnType, "int") {
 		return int(math.Round(price * 100))
@@ -388,12 +411,18 @@ func convertPriceValue(price float64, columnType string) interface{} {
 func convertCategoryValue(category string, columnType string) interface{} {
 	if strings.Contains(columnType, "int") {
 		switch category {
-		case "入门":
+		case "笛子":
 			return 1
-		case "进阶":
+		case "箫":
 			return 2
-		case "考级":
+		case "葫芦丝":
 			return 3
+		case "埙":
+			return 4
+		case "古筝":
+			return 5
+		case "其他":
+			return 6
 		default:
 			if n, err := strconv.Atoi(category); err == nil {
 				return n
