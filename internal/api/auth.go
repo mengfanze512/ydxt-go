@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -27,7 +29,106 @@ const (
 )
 
 type LoginRequest struct {
-	Code string `json:"code"`
+	Code      string `json:"code" binding:"required"`
+	PhoneCode string `json:"phone_code"`
+}
+
+type wechatAccessTokenResp struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
+	ErrCode     int    `json:"errcode"`
+	ErrMsg      string `json:"errmsg"`
+}
+
+type wechatPhoneNumberResp struct {
+	ErrCode   int    `json:"errcode"`
+	ErrMsg    string `json:"errmsg"`
+	PhoneInfo struct {
+		PhoneNumber     string `json:"phoneNumber"`
+		PurePhoneNumber string `json:"purePhoneNumber"`
+		CountryCode     string `json:"countryCode"`
+	} `json:"phone_info"`
+}
+
+func getWechatAccessToken() (string, error) {
+	q := url.Values{}
+	q.Set("grant_type", "client_credential")
+	q.Set("appid", strings.TrimSpace(config.GlobalConfig.Wechat.AppID))
+	q.Set("secret", strings.TrimSpace(config.GlobalConfig.Wechat.AppSecret))
+
+	fullURL := "https://api.weixin.qq.com/cgi-bin/token?" + q.Encode()
+	client := &http.Client{Timeout: 4 * time.Second}
+	httpResp, err := client.Get(fullURL)
+	if err != nil {
+		return "", fmt.Errorf("获取 access_token 请求失败: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	body, _ := io.ReadAll(httpResp.Body)
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return "", fmt.Errorf("获取 access_token 失败: HTTP %d %s", httpResp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var tokenResp wechatAccessTokenResp
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return "", fmt.Errorf("获取 access_token 失败: 解析微信响应失败")
+	}
+	if tokenResp.ErrCode != 0 {
+		return "", fmt.Errorf("获取 access_token 失败: errcode=%d errmsg=%s", tokenResp.ErrCode, tokenResp.ErrMsg)
+	}
+	if strings.TrimSpace(tokenResp.AccessToken) == "" {
+		return "", fmt.Errorf("获取 access_token 失败: access_token 为空")
+	}
+	return tokenResp.AccessToken, nil
+}
+
+func getWechatPhoneNumber(phoneCode string) (string, error) {
+	phoneCode = strings.TrimSpace(phoneCode)
+	if phoneCode == "" {
+		return "", nil
+	}
+
+	accessToken, err := getWechatAccessToken()
+	if err != nil {
+		return "", err
+	}
+
+	payload, _ := json.Marshal(map[string]string{"code": phoneCode})
+	fullURL := "https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=" + url.QueryEscape(accessToken)
+	req, err := http.NewRequest(http.MethodPost, fullURL, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("创建手机号请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 4 * time.Second}
+	httpResp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("获取微信手机号请求失败: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	body, _ := io.ReadAll(httpResp.Body)
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return "", fmt.Errorf("获取微信手机号失败: HTTP %d %s", httpResp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var phoneResp wechatPhoneNumberResp
+	if err := json.Unmarshal(body, &phoneResp); err != nil {
+		return "", fmt.Errorf("获取微信手机号失败: 解析微信响应失败")
+	}
+	if phoneResp.ErrCode != 0 {
+		return "", fmt.Errorf("获取微信手机号失败: errcode=%d errmsg=%s", phoneResp.ErrCode, phoneResp.ErrMsg)
+	}
+
+	phone := strings.TrimSpace(phoneResp.PhoneInfo.PurePhoneNumber)
+	if phone == "" {
+		phone = strings.TrimSpace(phoneResp.PhoneInfo.PhoneNumber)
+	}
+	if phone == "" {
+		return "", fmt.Errorf("获取微信手机号失败: 手机号为空")
+	}
+	return phone, nil
 }
 
 type PhoneLoginRequest struct {
@@ -268,21 +369,84 @@ func WxLogin(c *gin.Context) {
 		return
 	}
 
-	// 3. 在数据库中查询用户，如果没有则自动注册
+	wechatPhone, err := getWechatPhoneNumber(req.PhoneCode)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		return
+	}
+
+	// 3. 在数据库中查询用户，如果没有则自动注册/绑定手机号账号
 	var user model.User
 	result := model.DB.Where("openid = ?", session.OpenID).First(&user)
-	if result.Error != nil {
-		if result.Error != gorm.ErrRecordNotFound {
+	if result.Error == nil {
+		updates := map[string]interface{}{}
+		if wechatPhone != "" && strings.TrimSpace(user.Phone) == "" {
+			var samePhoneUser model.User
+			phoneResult := model.DB.Where("phone = ?", wechatPhone).First(&samePhoneUser)
+			if phoneResult.Error == nil && samePhoneUser.ID != user.ID {
+				c.JSON(http.StatusConflict, gin.H{"code": 409, "msg": "该手机号已绑定其他账号，请使用原手机号登录"})
+				return
+			}
+			if phoneResult.Error != nil && !errors.Is(phoneResult.Error, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "查询手机号绑定关系失败: " + phoneResult.Error.Error()})
+				return
+			}
+			updates["phone"] = wechatPhone
+		}
+		if strings.TrimSpace(session.UnionID) != "" && strings.TrimSpace(user.UnionID) == "" {
+			updates["unionid"] = session.UnionID
+		}
+		if len(updates) > 0 {
+			if err := model.DB.Model(&user).Updates(updates).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新微信登录信息失败: " + err.Error()})
+				return
+			}
+			if err := model.DB.Where("id = ?", user.ID).First(&user).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新成功但查询用户失败: " + err.Error()})
+				return
+			}
+		}
+	} else {
+		if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "查询用户失败: " + result.Error.Error()})
 			return
 		}
 
-		// phone 字段在库里允许为 NULL 且带唯一索引，不能用 Go 字符串零值写成空串。
 		createData := map[string]interface{}{
 			"openid": session.OpenID,
 			"role":   1,
 			"status": 1,
 			"phone":  nil,
+		}
+		if wechatPhone != "" {
+			var phoneUser model.User
+			phoneResult := model.DB.Where("phone = ?", wechatPhone).First(&phoneUser)
+			if phoneResult.Error == nil {
+				updates := map[string]interface{}{
+					"openid": session.OpenID,
+				}
+				if strings.TrimSpace(session.UnionID) != "" && strings.TrimSpace(phoneUser.UnionID) == "" {
+					updates["unionid"] = session.UnionID
+				}
+				if strings.TrimSpace(phoneUser.OpenID) != "" && strings.TrimSpace(phoneUser.OpenID) != session.OpenID {
+					c.JSON(http.StatusConflict, gin.H{"code": 409, "msg": "该手机号已绑定其他微信账号"})
+					return
+				}
+				if err := model.DB.Model(&phoneUser).Updates(updates).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "绑定手机号账号失败: " + err.Error()})
+					return
+				}
+				if err := model.DB.Where("id = ?", phoneUser.ID).First(&user).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "绑定成功但查询用户失败: " + err.Error()})
+					return
+				}
+				goto issueToken
+			}
+			if !errors.Is(phoneResult.Error, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "查询手机号用户失败: " + phoneResult.Error.Error()})
+				return
+			}
+			createData["phone"] = wechatPhone
 		}
 		if unionID := strings.TrimSpace(session.UnionID); unionID != "" {
 			createData["unionid"] = unionID
@@ -297,6 +461,7 @@ func WxLogin(c *gin.Context) {
 		}
 	}
 
+issueToken:
 	// 4. 为该用户生成 JWT Token
 	token, err := utils.GenerateToken(user.ID, user.Role, accountTypeUser, roleCodeStudent, 0)
 	if err != nil {
