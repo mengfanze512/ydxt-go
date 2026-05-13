@@ -2,6 +2,8 @@ package config
 
 import (
 	"log"
+	"os"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -64,6 +66,14 @@ func InitConfig() {
 	GlobalConfig = &Config{}
 	if err := viper.Unmarshal(GlobalConfig); err != nil {
 		log.Fatalf("Unable to decode into struct: %v\n", err)
+	}
+
+	// 云托管环境优先从环境变量覆盖微信配置，避免把敏感配置写死在仓库里。
+	if val := strings.TrimSpace(os.Getenv("WECHAT_APP_ID")); val != "" {
+		GlobalConfig.Wechat.AppID = val
+	}
+	if val := strings.TrimSpace(os.Getenv("WECHAT_APP_SECRET")); val != "" {
+		GlobalConfig.Wechat.AppSecret = val
 	}
 
 	log.Println("Config loaded successfully!")

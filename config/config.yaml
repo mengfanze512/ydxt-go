@@ -14,8 +14,8 @@ jwt:
   expire_hours: 72
 
 wechat:
-  app_id: "wx4ebf6ad38cff5270"
-  app_secret: "请替换为真实的AppSecret"
+  app_id: "wx21d848149aa4a1a5"
+  app_secret: "710af88b1171f21031cdb8f019166828"
   mch_id: "请替换为微信商户号"
   mch_api_v3_key: "请替换为APIv3密钥"
 

@@ -92,13 +92,18 @@ func InitDB() {
 // InitRedis 初始化 Redis 连接
 func InitRedis() {
 	rdbConfig := config.GlobalConfig.Redis
+	if rdbConfig.Addr == "" {
+		log.Println("Redis config is empty, skip Redis initialization.")
+		return
+	}
+
 	RDB = redis.NewClient(&redis.Options{
 		Addr:     rdbConfig.Addr,
 		Password: rdbConfig.Password,
 		DB:       rdbConfig.DB,
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
 	defer cancel()
 
 	_, err := RDB.Ping(ctx).Result()

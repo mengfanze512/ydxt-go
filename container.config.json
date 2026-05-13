@@ -2,7 +2,7 @@
   "containerPort": 80,
   "dockerfilePath": "Dockerfile",
   "buildDir": "",
-  "minNum": 0,
+  "minNum": 1,
   "maxNum": 5,
   "cpu": 0.25,
   "mem": 0.5,
