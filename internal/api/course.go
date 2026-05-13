@@ -409,6 +409,7 @@ func normalizeCoursePrices(courses []model.Course) {
 	priceColumnType := getCoursePriceColumnType()
 	for i := range courses {
 		courses[i].Price = normalizeCoursePriceValue(courses[i].Price, priceColumnType)
+		normalizeCourseType(&courses[i])
 	}
 }
 
@@ -417,6 +418,7 @@ func normalizeCoursePrice(course *model.Course) {
 		return
 	}
 	course.Price = normalizeCoursePriceValue(course.Price, getCoursePriceColumnType())
+	normalizeCourseType(course)
 }
 
 func getCoursePriceColumnType() string {
@@ -488,5 +490,22 @@ func convertLevelToType(level string) int {
 		return 3
 	default:
 		return 1
+	}
+}
+
+func normalizeCourseType(course *model.Course) {
+	if course == nil {
+		return
+	}
+	if strings.TrimSpace(course.Level) != "" {
+		return
+	}
+	switch course.Type {
+	case 2:
+		course.Level = "1v1"
+	case 3:
+		course.Level = "vip"
+	default:
+		course.Level = "system"
 	}
 }

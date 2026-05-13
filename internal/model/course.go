@@ -13,6 +13,7 @@ type Course struct {
 	Category       string    `gorm:"column:category" json:"category"`               // 分类：如 "入门", "进阶", "考级"
 	Difficulty     int       `gorm:"column:difficulty" json:"difficulty"`           // 适用人群/难度
 	Level          string    `gorm:"column:level" json:"level"`                     // 课程类型："system"系统课, "1v1"私教, "vip"会员课
+	Type           int       `gorm:"column:type" json:"type"`                       // 历史课程类型字段：1=系统课, 2=1对1, 3=会员课
 	Desc           string    `gorm:"column:description" json:"description"`         // 课程描述
 	DetailContent  string    `gorm:"column:detail_content" json:"detail_content"`   // 课程详情(富文本HTML)
 	CarouselImages string    `gorm:"column:carousel_images" json:"carousel_images"` // 轮播图(JSON数组字符串)
