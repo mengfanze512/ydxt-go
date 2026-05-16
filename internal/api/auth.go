@@ -248,22 +248,21 @@ func AdminLogin(c *gin.Context) {
 		return
 	}
 
-	var user model.User
-	// 这里用 Phone 字段暂代 Username
-	result := model.DB.Where("phone = ?", req.Username).First(&user)
+	var admin model.Admin
+	result := model.DB.Where("username = ?", req.Username).First(&admin)
 	if result.Error != nil {
 		// 为了测试方便，如果查不到账号且账号是 admin，则自动创建超级管理员
 		if req.Username == "admin" && req.Password == "123456" {
 			hashedPwd, _ := bcrypt.GenerateFromPassword([]byte("123456"), bcrypt.DefaultCost)
-			user = model.User{
-				Phone:    "admin",
-				OpenID:   "admin_dummy_openid", // openid 在数据库是必填项，所以填一个默认值
-				Password: string(hashedPwd),
-				Role:     9,
-				Status:   1,
-				Nickname: "超级管理员",
+			admin = model.Admin{
+				Username:     "admin",
+				PasswordHash: string(hashedPwd),
+				Name:         "超级管理员",
+				Mobile:       "",
+				RoleCode:     model.AdminRoleSuper,
+				Status:       1,
 			}
-			if err := model.DB.Create(&user).Error; err != nil {
+			if err := model.DB.Create(&admin).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建管理员账号失败: " + err.Error()})
 				return
 			}
@@ -273,19 +272,22 @@ func AdminLogin(c *gin.Context) {
 		}
 	} else {
 		// 校验密码
-		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(req.Password)); err != nil {
 			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户名或密码错误"})
 			return
 		}
 	}
 
-	// 校验权限 (只有 role=9 管理员能登录后台)
-	if user.Role != 9 {
-		c.JSON(http.StatusOK, gin.H{"code": 403, "msg": "无权限登录管理后台"})
+	if admin.Status != 1 {
+		c.JSON(http.StatusOK, gin.H{"code": 403, "msg": "账号已禁用"})
 		return
 	}
 
-	token, err := utils.GenerateToken(user.ID, user.Role, accountTypeAdmin, model.AdminRoleSuper, 0)
+	now := time.Now()
+	_ = model.DB.Model(&model.Admin{}).Where("id = ?", admin.ID).Update("last_login_at", now).Error
+	admin.LastLoginAt = &now
+
+	token, err := utils.GenerateToken(admin.ID, 9, accountTypeAdmin, admin.RoleCode, 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
 		return
@@ -297,11 +299,12 @@ func AdminLogin(c *gin.Context) {
 		"data": gin.H{
 			"token": token,
 			"user": gin.H{
-				"id":       user.ID,
-				"username": user.Phone,
-				"nickname": user.Nickname,
-				"avatar":   user.Avatar,
-				"role":     user.Role,
+				"id":       admin.ID,
+				"username": admin.Username,
+				"nickname": admin.Name,
+				"avatar":   "",
+				"role":     int8(9),
+				"roleCode": admin.RoleCode,
 			},
 		},
 	})
