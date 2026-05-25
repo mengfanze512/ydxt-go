@@ -12,6 +12,7 @@ func InitRouter() *gin.Engine {
 	r := gin.Default()
 
 	// 全局中间件：跨域、恢复等
+	r.Use(middleware.CORS())
 	r.Use(gin.Recovery())
 
 	// 测试健康检查接口 (微信云托管非常需要这个来探测容器存活)
@@ -35,7 +36,15 @@ func InitRouter() *gin.Engine {
 			public.POST("/auth/phone-login", PhoneLogin)
 			// 管理后台登录
 			public.POST("/admin/login", AdminLogin)
-			// TODO: 获取公开课程列表
+			// 教学平台公开内容数据
+			public.GET("/courses", GetCourseList)
+			public.GET("/courses/:id", GetCourseDetail)
+			public.GET("/courses/:id/chapters", GetCourseChapters)
+			public.GET("/chapters/:id/lessons", GetChapterLessons)
+			public.GET("/shop/goods", GetShopGoods)
+			public.GET("/shop/goods/:id", GetShopGoodsDetail)
+			public.GET("/sheet-musics", GetSheetMusics)
+			public.GET("/sheet-musics/:id", GetSheetMusicDetail)
 		}
 
 		// === 需要登录鉴权的接口 ===
@@ -60,6 +69,14 @@ func InitRouter() *gin.Engine {
 			{
 				// 获取声网进房 Token
 				rtcGroup.POST("/token", GenerateRTCToken)
+			}
+
+			shopGroup := auth.Group("/shop")
+			{
+				shopGroup.GET("/cart", GetCartItems)
+				shopGroup.POST("/cart", AddToCart)
+				shopGroup.PATCH("/cart/:id", UpdateCartItem)
+				shopGroup.DELETE("/cart/:id", DeleteCartItem)
 			}
 
 			// === 仅限教师操作的接口 ===
@@ -127,8 +144,6 @@ func InitRouter() *gin.Engine {
 			adminCompatGroup.Use(middleware.RoleAuth(2, 9))
 			{
 				adminCompatGroup.GET("/practice/records", GetPracticeRecords)
-				adminCompatGroup.GET("/shop/goods", GetShopGoods)
-				adminCompatGroup.GET("/sheet-musics", GetSheetMusics)
 			}
 		}
 	}

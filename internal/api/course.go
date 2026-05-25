@@ -410,6 +410,7 @@ func normalizeCoursePrices(courses []model.Course) {
 	for i := range courses {
 		courses[i].Price = normalizeCoursePriceValue(courses[i].Price, priceColumnType)
 		normalizeCourseType(&courses[i])
+		normalizeCourseCover(&courses[i])
 	}
 }
 
@@ -419,6 +420,7 @@ func normalizeCoursePrice(course *model.Course) {
 	}
 	course.Price = normalizeCoursePriceValue(course.Price, getCoursePriceColumnType())
 	normalizeCourseType(course)
+	normalizeCourseCover(course)
 }
 
 func getCoursePriceColumnType() string {
@@ -507,5 +509,14 @@ func normalizeCourseType(course *model.Course) {
 		course.Level = "vip"
 	default:
 		course.Level = "system"
+	}
+}
+
+func normalizeCourseCover(course *model.Course) {
+	if course == nil {
+		return
+	}
+	if strings.TrimSpace(course.Cover) == "" {
+		course.Cover = strings.TrimSpace(course.CoverURL)
 	}
 }
