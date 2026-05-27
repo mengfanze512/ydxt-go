@@ -123,6 +123,18 @@ func InitRouter() *gin.Engine {
 
 				adminGroup.GET("/orders", GetOrderList)
 
+				adminGroup.GET("/shop/goods", AdminGetShopGoods)
+				adminGroup.POST("/shop/goods", AdminCreateShopGoods)
+				adminGroup.PUT("/shop/goods/:id", AdminUpdateShopGoods)
+				adminGroup.PATCH("/shop/goods/:id/status", AdminUpdateShopGoodsStatus)
+				adminGroup.DELETE("/shop/goods/:id", AdminDeleteShopGoods)
+
+				adminGroup.GET("/sheet-musics", AdminGetSheetMusics)
+				adminGroup.GET("/sheet-musics/:id", AdminGetSheetMusicDetail)
+				adminGroup.POST("/sheet-musics", AdminCreateSheetMusic)
+				adminGroup.PUT("/sheet-musics/:id", AdminUpdateSheetMusic)
+				adminGroup.DELETE("/sheet-musics/:id", AdminDeleteSheetMusic)
+
 				adminGroup.GET("/learning/tasks", GetLearningTasks)
 				adminGroup.POST("/learning/tasks", CreateLearningTask)
 				adminGroup.PUT("/learning/tasks/:id", UpdateLearningTask)

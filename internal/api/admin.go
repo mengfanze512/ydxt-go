@@ -55,6 +55,15 @@ func requireSuperAdmin(c *gin.Context) bool {
 	return true
 }
 
+func requireAdminAccount(c *gin.Context) bool {
+	accountType, _ := c.Get("accountType")
+	if accountType != accountTypeAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": "仅管理员可操作"})
+		return false
+	}
+	return true
+}
+
 // AdminGetUsers 获取学员列表
 func AdminGetUsers(c *gin.Context) {
 	if model.DB == nil {
