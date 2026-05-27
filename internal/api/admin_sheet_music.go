@@ -46,6 +46,31 @@ func AdminGetSheetMusics(c *gin.Context) {
 		return
 	}
 
+	if isLegacySheetMusicSchema() {
+		var sheets []legacySheetMusicRecord
+		query := model.DB.Table("sheet_musics").
+			Select("id, title, instrument, difficulty, img_url, xml_url, status, is_deleted").
+			Where("is_deleted = ?", 0).
+			Order("created_at desc")
+		if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+			like := "%" + keyword + "%"
+			query = query.Where("title LIKE ?", like)
+		}
+		if instrument := strings.TrimSpace(c.Query("instrument")); instrument != "" && instrument != "全部" {
+			query = query.Where("instrument = ?", instrument)
+		}
+		if err := query.Scan(&sheets).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取曲谱列表失败"})
+			return
+		}
+		result := make([]sheetMusicResponse, 0, len(sheets))
+		for _, item := range sheets {
+			result = append(result, toLegacySheetMusicResponse(item))
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": result})
+		return
+	}
+
 	var sheets []model.SheetMusic
 	query := model.DB.Order("created_at desc")
 
@@ -85,6 +110,19 @@ func AdminGetSheetMusicDetail(c *gin.Context) {
 		return
 	}
 
+	if isLegacySheetMusicSchema() {
+		var sheet legacySheetMusicRecord
+		if err := model.DB.Table("sheet_musics").
+			Select("id, title, instrument, difficulty, img_url, xml_url, status, is_deleted").
+			Where("id = ? AND is_deleted = ?", id, 0).
+			First(&sheet).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "曲谱不存在"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": toLegacySheetMusicResponse(sheet)})
+		return
+	}
+
 	var sheet model.SheetMusic
 	if err := model.DB.Where("id = ?", id).First(&sheet).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "曲谱不存在"})
@@ -103,6 +141,31 @@ func AdminCreateSheetMusic(c *gin.Context) {
 	var req adminSheetMusicRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+		return
+	}
+
+	if isLegacySheetMusicSchema() {
+		firstContent := firstSheetContentURL(req.ContentURL)
+		coverURL := firstSheetMusicNonEmpty(req.CoverURL, firstContent)
+		contentURL := firstSheetMusicNonEmpty(firstContent, coverURL)
+		if coverURL == "" || contentURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "旧版曲谱表至少需要一个封面或预览地址"})
+			return
+		}
+		data := map[string]interface{}{
+			"title":      strings.TrimSpace(req.Title),
+			"instrument": strings.TrimSpace(req.Instrument),
+			"difficulty": normalizeDifficulty(req.Difficulty),
+			"img_url":    coverURL,
+			"xml_url":    contentURL,
+			"status":     1,
+			"is_deleted": 0,
+		}
+		if err := model.DB.Table("sheet_musics").Create(data).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增曲谱失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
 		return
 	}
 
@@ -142,6 +205,34 @@ func AdminUpdateSheetMusic(c *gin.Context) {
 		return
 	}
 
+	if isLegacySheetMusicSchema() {
+		firstContent := firstSheetContentURL(req.ContentURL)
+		coverURL := firstSheetMusicNonEmpty(req.CoverURL, firstContent)
+		contentURL := firstSheetMusicNonEmpty(firstContent, coverURL)
+		if coverURL == "" || contentURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "旧版曲谱表至少需要一个封面或预览地址"})
+			return
+		}
+		updates := map[string]interface{}{
+			"title":      strings.TrimSpace(req.Title),
+			"instrument": strings.TrimSpace(req.Instrument),
+			"difficulty": normalizeDifficulty(req.Difficulty),
+			"img_url":    coverURL,
+			"xml_url":    contentURL,
+		}
+		result := model.DB.Table("sheet_musics").Where("id = ? AND is_deleted = ?", id, 0).Updates(updates)
+		if result.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新曲谱失败"})
+			return
+		}
+		if result.RowsAffected == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "曲谱不存在"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
+		return
+	}
+
 	updates := map[string]interface{}{
 		"title":       strings.TrimSpace(req.Title),
 		"author":      strings.TrimSpace(req.Author),
@@ -176,6 +267,22 @@ func AdminDeleteSheetMusic(c *gin.Context) {
 
 	id, ok := parseUint(c, "id")
 	if !ok {
+		return
+	}
+
+	if isLegacySheetMusicSchema() {
+		result := model.DB.Table("sheet_musics").Where("id = ? AND is_deleted = ?", id, 0).Updates(map[string]interface{}{
+			"is_deleted": 1,
+		})
+		if result.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除曲谱失败"})
+			return
+		}
+		if result.RowsAffected == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "曲谱不存在"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
 		return
 	}
 

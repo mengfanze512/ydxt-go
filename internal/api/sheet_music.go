@@ -5,9 +5,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"ydxt-go/internal/model"
 
 	"github.com/gin-gonic/gin"
+)
+
+var (
+	sheetMusicColumnsOnce sync.Once
+	sheetMusicColumns     map[string]bool
 )
 
 type sheetMusicResponse struct {
@@ -23,6 +29,52 @@ type sheetMusicResponse struct {
 	Downloads  int      `json:"downloads"`
 }
 
+type legacySheetMusicRecord struct {
+	ID        uint64 `gorm:"column:id"`
+	Title     string `gorm:"column:title"`
+	Instrument string `gorm:"column:instrument"`
+	Difficulty int8   `gorm:"column:difficulty"`
+	ImgURL    string `gorm:"column:img_url"`
+	XMLURL    string `gorm:"column:xml_url"`
+	Status    int8   `gorm:"column:status"`
+	IsDeleted int8   `gorm:"column:is_deleted"`
+}
+
+func loadSheetMusicColumns() {
+	sheetMusicColumns = map[string]bool{}
+	if model.DB == nil {
+		return
+	}
+	var columns []struct {
+		Field string `gorm:"column:Field"`
+	}
+	if err := model.DB.Raw("SHOW COLUMNS FROM sheet_musics").Scan(&columns).Error; err != nil {
+		return
+	}
+	for _, column := range columns {
+		sheetMusicColumns[strings.TrimSpace(column.Field)] = true
+	}
+}
+
+func hasSheetMusicColumn(column string) bool {
+	sheetMusicColumnsOnce.Do(loadSheetMusicColumns)
+	return sheetMusicColumns[column]
+}
+
+func isLegacySheetMusicSchema() bool {
+	return hasSheetMusicColumn("img_url") && !hasSheetMusicColumn("cover_url")
+}
+
+func firstSheetMusicNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func parseSheetContentURLs(raw string) []string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -35,6 +87,14 @@ func parseSheetContentURLs(raw string) []string {
 		}
 	}
 	return []string{raw}
+}
+
+func firstSheetContentURL(raw string) string {
+	urls := parseSheetContentURLs(raw)
+	if len(urls) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(urls[0])
 }
 
 func toSheetMusicResponse(item model.SheetMusic) sheetMusicResponse {
@@ -52,10 +112,49 @@ func toSheetMusicResponse(item model.SheetMusic) sheetMusicResponse {
 	}
 }
 
+func toLegacySheetMusicResponse(item legacySheetMusicRecord) sheetMusicResponse {
+	contentURL := strings.TrimSpace(item.XMLURL)
+	coverURL := firstSheetMusicNonEmpty(item.ImgURL, contentURL)
+	return sheetMusicResponse{
+		ID:          item.ID,
+		Title:       item.Title,
+		Author:      "",
+		Instrument:  item.Instrument,
+		Difficulty:  item.Difficulty,
+		IsFree:      1,
+		CoverURL:    coverURL,
+		ContentURL:  contentURL,
+		ContentURLs: parseSheetContentURLs(contentURL),
+		Downloads:   0,
+	}
+}
+
 // GetSheetMusics 获取曲谱列表
 func GetSheetMusics(c *gin.Context) {
 	if model.DB == nil {
 		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": []sheetMusicResponse{}})
+		return
+	}
+
+	if isLegacySheetMusicSchema() {
+		var sheets []legacySheetMusicRecord
+		query := model.DB.Table("sheet_musics").
+			Select("id, title, instrument, difficulty, img_url, xml_url, status, is_deleted").
+			Where("is_deleted = ?", 0).
+			Where("status = ?", 1).
+			Order("created_at desc")
+		if instrument := strings.TrimSpace(c.Query("instrument")); instrument != "" && instrument != "全部" {
+			query = query.Where("instrument = ?", instrument)
+		}
+		if err := query.Scan(&sheets).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取曲谱失败"})
+			return
+		}
+		result := make([]sheetMusicResponse, 0, len(sheets))
+		for _, item := range sheets {
+			result = append(result, toLegacySheetMusicResponse(item))
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": result})
 		return
 	}
 
@@ -87,6 +186,19 @@ func GetSheetMusicDetail(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "曲谱ID无效"})
+		return
+	}
+
+	if isLegacySheetMusicSchema() {
+		var sheet legacySheetMusicRecord
+		if err := model.DB.Table("sheet_musics").
+			Select("id, title, instrument, difficulty, img_url, xml_url, status, is_deleted").
+			Where("id = ? AND is_deleted = ? AND status = ?", id, 0, 1).
+			First(&sheet).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "曲谱不存在"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": toLegacySheetMusicResponse(sheet)})
 		return
 	}
 
