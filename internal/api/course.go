@@ -502,21 +502,12 @@ func normalizeCourseType(course *model.Course) {
 	if strings.TrimSpace(course.Level) != "" {
 		return
 	}
-	switch course.Type {
-	case 2:
-		course.Level = "1v1"
-	case 3:
-		course.Level = "vip"
-	default:
-		course.Level = "system"
-	}
+	course.Level = "system"
 }
 
 func normalizeCourseCover(course *model.Course) {
 	if course == nil {
 		return
 	}
-	if strings.TrimSpace(course.Cover) == "" {
-		course.Cover = strings.TrimSpace(course.CoverURL)
-	}
+	course.Cover = strings.TrimSpace(course.Cover)
 }
