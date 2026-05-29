@@ -81,6 +81,19 @@ func InitRouter() *gin.Engine {
 				shopGroup.GET("/orders", GetMyOrders)
 			}
 
+			communityGroup := auth.Group("/community")
+			{
+				communityGroup.GET("/posts", GetCommunityPosts)
+				communityGroup.GET("/posts/:id", GetCommunityPostDetail)
+				communityGroup.POST("/posts", CreateCommunityPost)
+				communityGroup.PUT("/posts/:id", UpdateCommunityPost)
+				communityGroup.DELETE("/posts/:id", DeleteCommunityPost)
+				communityGroup.POST("/posts/:id/like", LikeCommunityPost)
+				communityGroup.DELETE("/posts/:id/like", UnlikeCommunityPost)
+				communityGroup.POST("/posts/:id/favorite", FavoriteCommunityPost)
+				communityGroup.DELETE("/posts/:id/favorite", UnfavoriteCommunityPost)
+			}
+
 			// === 仅限教师操作的接口 ===
 			teacherGroup := auth.Group("/teacher")
 			teacherGroup.Use(middleware.RoleAuth(2, 9)) // 仅允许 role=2(讲师) 或 9(管理员) 访问
@@ -150,7 +163,12 @@ func InitRouter() *gin.Engine {
 				adminGroup.GET("/learning/tasks/:id/submissions", GetTaskSubmissions)
 
 				adminGroup.GET("/finance/settlements", GetSettlements)
-				adminGroup.GET("/community/posts", GetPosts)
+				adminGroup.GET("/community/posts", AdminGetCommunityPosts)
+				adminGroup.GET("/community/posts/:id", AdminGetCommunityPostDetail)
+				adminGroup.POST("/community/posts/:id/approve", AdminApproveCommunityPost)
+				adminGroup.POST("/community/posts/:id/reject", AdminRejectCommunityPost)
+				adminGroup.PATCH("/community/posts/:id/flags", AdminUpdateCommunityPostFlags)
+				adminGroup.DELETE("/community/posts/:id", AdminDeleteCommunityPost)
 			}
 
 			// 管理端复用的非 /admin 前缀接口
