@@ -57,7 +57,7 @@ func getWechatAccessToken() (string, error) {
 	q.Set("secret", strings.TrimSpace(config.GlobalConfig.Wechat.AppSecret))
 
 	fullURL := "https://api.weixin.qq.com/cgi-bin/token?" + q.Encode()
-	client := &http.Client{Timeout: 4 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second}
 	httpResp, err := client.Get(fullURL)
 	if err != nil {
 		return "", fmt.Errorf("获取 access_token 请求失败: %w", err)
@@ -101,7 +101,7 @@ func getWechatPhoneNumber(phoneCode string) (string, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 4 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second}
 	httpResp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("获取微信手机号请求失败: %w", err)
@@ -340,7 +340,7 @@ func WxLogin(c *gin.Context) {
 	endpoint := "https://api.weixin.qq.com/sns/jscode2session"
 	fullURL := endpoint + "?" + q.Encode()
 
-	client := &http.Client{Timeout: 4 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second}
 	httpResp, err := client.Get(fullURL)
 	if err != nil {
 		log.Printf("Code2Session HTTP Error: %v\n", err)

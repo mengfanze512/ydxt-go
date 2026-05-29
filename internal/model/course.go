@@ -7,14 +7,11 @@ type Course struct {
 	ID             uint64    `gorm:"primaryKey;column:id" json:"id"`
 	Title          string    `gorm:"column:title" json:"title"`                     // 课程标题
 	Cover          string    `gorm:"column:cover" json:"cover"`                     // 课程封面图
-	CoverURL       string    `gorm:"column:cover_url" json:"cover_url"`             // 兼容真实库中的 cover_url
 	Price          float64   `gorm:"column:price;type:decimal(10,2)" json:"price"`  // 价格
 	TeacherID      uint64    `gorm:"column:teacher_id" json:"teacher_id"`           // 讲师ID
 	TeacherName    string    `gorm:"-" json:"teacher_name"`                         // 讲师名称(关联查询用)
 	Category       string    `gorm:"column:category" json:"category"`               // 分类：如 "入门", "进阶", "考级"
-	Difficulty     int       `gorm:"column:difficulty" json:"difficulty"`           // 适用人群/难度
 	Level          string    `gorm:"column:level" json:"level"`                     // 课程类型："system"系统课, "1v1"私教, "vip"会员课
-	Type           int       `gorm:"column:type" json:"type"`                       // 历史课程类型字段：1=系统课, 2=1对1, 3=会员课
 	Desc           string    `gorm:"column:description" json:"description"`         // 课程描述
 	DetailContent  string    `gorm:"column:detail_content" json:"detail_content"`   // 课程详情(富文本HTML)
 	CarouselImages string    `gorm:"column:carousel_images" json:"carousel_images"` // 轮播图(JSON数组字符串)
