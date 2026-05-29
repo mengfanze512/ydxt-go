@@ -9,6 +9,11 @@ const (
 	CommunityPostStatusDeleted  = "deleted"
 )
 
+const (
+	CommunityCommentStatusApproved = "approved"
+	CommunityCommentStatusDeleted  = "deleted"
+)
+
 // CommunityPost 社区帖子表
 type CommunityPost struct {
 	ID             uint64    `gorm:"primaryKey" json:"id"`
@@ -53,4 +58,30 @@ type CommunityPostFavorite struct {
 
 func (CommunityPostFavorite) TableName() string {
 	return "community_post_favorites"
+}
+
+type CommunityPostComment struct {
+	ID            uint64    `gorm:"primaryKey" json:"id"`
+	PostID        uint64    `gorm:"column:post_id;index" json:"post_id"`
+	UserID        uint64    `gorm:"column:user_id;index" json:"user_id"`
+	ParentID      uint64    `gorm:"column:parent_id;index" json:"parent_id"`
+	ReplyToUserID uint64    `gorm:"column:reply_to_user_id;index" json:"reply_to_user_id"`
+	Content       string    `gorm:"column:content;type:text" json:"content"`
+	Status        string    `gorm:"column:status;type:varchar(32);default:'approved';index" json:"status"` // approved/deleted
+	CreatedAt     time.Time `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt     time.Time `gorm:"column:updated_at" json:"updated_at"`
+}
+
+func (CommunityPostComment) TableName() string {
+	return "community_post_comments"
+}
+
+type CommunitySensitiveWord struct {
+	ID        uint64    `gorm:"primaryKey" json:"id"`
+	Word      string    `gorm:"column:word;type:varchar(64);uniqueIndex:uniq_word" json:"word"`
+	CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
+}
+
+func (CommunitySensitiveWord) TableName() string {
+	return "community_sensitive_words"
 }

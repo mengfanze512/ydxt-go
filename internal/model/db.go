@@ -75,7 +75,7 @@ func InitDB() {
 			&User{}, &Admin{}, &Teacher{}, &Course{}, &LiveRoom{}, &UserWallet{}, &LiveGiftRecord{},
 			&CourseChapter{}, &CourseLesson{},
 			&ShopGoods{}, &CartItem{}, &Order{}, &OrderItem{}, &SheetMusic{},
-			&UserCheckin{}, &PracticeRecord{}, &CommunityPost{}, &CommunityPostLike{}, &CommunityPostFavorite{}, &FinanceSettlement{},
+			&UserCheckin{}, &PracticeRecord{}, &CommunityPost{}, &CommunityPostLike{}, &CommunityPostFavorite{}, &CommunityPostComment{}, &CommunitySensitiveWord{}, &FinanceSettlement{},
 			&LearningTask{}, &LearningTaskQuestion{}, &LearningTaskSubmission{},
 			&LearningTaskAnswer{}, &UserCourseProgress{}, &UserLessonProgress{},
 		)

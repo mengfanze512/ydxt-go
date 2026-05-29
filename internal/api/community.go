@@ -3,14 +3,72 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"ydxt-go/internal/model"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+var (
+	sensitiveWordsMu       sync.RWMutex
+	sensitiveWordsCachedAt time.Time
+	sensitiveWordsCache    []string
+)
+
+func loadSensitiveWords(force bool) []string {
+	if model.DB == nil {
+		return []string{}
+	}
+	sensitiveWordsMu.RLock()
+	cachedAt := sensitiveWordsCachedAt
+	cached := sensitiveWordsCache
+	sensitiveWordsMu.RUnlock()
+	if !force && time.Since(cachedAt) < 30*time.Second && cachedAt.After(time.Unix(0, 0)) {
+		return cached
+	}
+
+	var rows []model.CommunitySensitiveWord
+	if err := model.DB.Order("id asc").Find(&rows).Error; err != nil {
+		return cached
+	}
+	words := make([]string, 0, len(rows))
+	for _, row := range rows {
+		w := strings.TrimSpace(row.Word)
+		if w == "" {
+			continue
+		}
+		words = append(words, w)
+	}
+
+	sensitiveWordsMu.Lock()
+	sensitiveWordsCache = words
+	sensitiveWordsCachedAt = time.Now()
+	sensitiveWordsMu.Unlock()
+	return words
+}
+
+func hitSensitiveWord(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	words := loadSensitiveWords(false)
+	if len(words) == 0 {
+		return false
+	}
+	for _, w := range words {
+		if w != "" && strings.Contains(text, w) {
+			return true
+		}
+	}
+	return false
+}
 
 type communityPostResponse struct {
 	ID             uint64   `json:"id"`
@@ -319,7 +377,13 @@ func CreateCommunityPost(c *gin.Context) {
 		Status:        model.CommunityPostStatusPending,
 	}
 	if err := model.DB.Create(&post).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "发布失败"})
+		log.Printf("CreateCommunityPost failed: %v", err)
+		errMsg := "发布失败"
+		raw := err.Error()
+		if strings.Contains(raw, "Unknown column") || strings.Contains(raw, "doesn't exist") {
+			errMsg = "发布失败：数据库表结构未更新"
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": errMsg})
 		return
 	}
 
@@ -384,7 +448,13 @@ func UpdateCommunityPost(c *gin.Context) {
 		"reject_reason":   "",
 	}
 	if err := model.DB.Model(&model.CommunityPost{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新失败"})
+		log.Printf("UpdateCommunityPost failed: %v", err)
+		errMsg := "更新失败"
+		raw := err.Error()
+		if strings.Contains(raw, "Unknown column") || strings.Contains(raw, "doesn't exist") {
+			errMsg = "更新失败：数据库表结构未更新"
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": errMsg})
 		return
 	}
 
@@ -560,6 +630,383 @@ type adminCommunityListResponse struct {
 	Total    int64                   `json:"total"`
 	Page     int                     `json:"page"`
 	PageSize int                     `json:"page_size"`
+}
+
+type communityCommentResponse struct {
+	ID              uint64                     `json:"id"`
+	PostID          uint64                     `json:"post_id"`
+	UserID          uint64                     `json:"user_id"`
+	ParentID        uint64                     `json:"parent_id"`
+	ReplyToUserID   uint64                     `json:"reply_to_user_id"`
+	AuthorNickname  string                     `json:"author_nickname"`
+	AuthorAvatar    string                     `json:"author_avatar"`
+	ReplyToNickname string                     `json:"reply_to_nickname"`
+	Content         string                     `json:"content"`
+	Status          string                     `json:"status"`
+	CreatedAt       string                     `json:"created_at"`
+	Replies         []communityCommentResponse `json:"replies,omitempty"`
+}
+
+type createCommentRequest struct {
+	Content          string `json:"content"`
+	ReplyToCommentID uint64 `json:"reply_to_comment_id"`
+}
+
+func toCommunityCommentResponse(item model.CommunityPostComment, nicknameMap map[uint64]string, avatarMap map[uint64]string) communityCommentResponse {
+	return communityCommentResponse{
+		ID:              item.ID,
+		PostID:          item.PostID,
+		UserID:          item.UserID,
+		ParentID:        item.ParentID,
+		ReplyToUserID:   item.ReplyToUserID,
+		AuthorNickname:  nicknameMap[item.UserID],
+		AuthorAvatar:    avatarMap[item.UserID],
+		ReplyToNickname: nicknameMap[item.ReplyToUserID],
+		Content:         item.Content,
+		Status:          item.Status,
+		CreatedAt:       item.CreatedAt.Format("2006-01-02 15:04:05"),
+	}
+}
+
+func extractCommentUserIDs(comments []model.CommunityPostComment) []uint64 {
+	m := map[uint64]struct{}{}
+	for _, item := range comments {
+		if item.UserID > 0 {
+			m[item.UserID] = struct{}{}
+		}
+		if item.ReplyToUserID > 0 {
+			m[item.ReplyToUserID] = struct{}{}
+		}
+	}
+	ids := make([]uint64, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func ensurePostExists(postID uint64) bool {
+	if model.DB == nil || postID == 0 {
+		return false
+	}
+	var post model.CommunityPost
+	if err := model.DB.Select("id, status").First(&post, postID).Error; err != nil {
+		return false
+	}
+	if post.Status == model.CommunityPostStatusDeleted {
+		return false
+	}
+	return true
+}
+
+// GetCommunityPostComments 教学端：评论列表（二级）
+func GetCommunityPostComments(c *gin.Context) {
+	if model.DB == nil {
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": []communityCommentResponse{}})
+		return
+	}
+	postID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	if postID == 0 || !ensurePostExists(postID) {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "帖子不存在"})
+		return
+	}
+
+	var comments []model.CommunityPostComment
+	if err := model.DB.Where("post_id = ? AND status <> ?", postID, model.CommunityCommentStatusDeleted).Order("created_at asc").Find(&comments).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取评论失败"})
+		return
+	}
+
+	nicknameMap, avatarMap := buildNicknameAvatarMap(extractCommentUserIDs(comments))
+	topMap := map[uint64]*communityCommentResponse{}
+	topList := make([]communityCommentResponse, 0)
+	replies := make([]model.CommunityPostComment, 0)
+	for _, item := range comments {
+		if item.ParentID == 0 {
+			resp := toCommunityCommentResponse(item, nicknameMap, avatarMap)
+			topList = append(topList, resp)
+			topMap[item.ID] = &topList[len(topList)-1]
+			continue
+		}
+		replies = append(replies, item)
+	}
+	for _, item := range replies {
+		parent := topMap[item.ParentID]
+		if parent == nil {
+			continue
+		}
+		parent.Replies = append(parent.Replies, toCommunityCommentResponse(item, nicknameMap, avatarMap))
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": topList})
+}
+
+// CreateCommunityPostComment 教学端：发表评论/回复（二级）
+func CreateCommunityPostComment(c *gin.Context) {
+	if model.DB == nil {
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": nil})
+		return
+	}
+	userID, ok := currentUserID(c)
+	if !ok || userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "未登录"})
+		return
+	}
+
+	postID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	if postID == 0 || !ensurePostExists(postID) {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "帖子不存在"})
+		return
+	}
+
+	var req createCommentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+		return
+	}
+	req.Content = strings.TrimSpace(req.Content)
+	if req.Content == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "评论不能为空"})
+		return
+	}
+	if hitSensitiveWord(req.Content) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "包含敏感词"})
+		return
+	}
+
+	var parentID uint64
+	var replyToUserID uint64
+	if req.ReplyToCommentID > 0 {
+		var replyTo model.CommunityPostComment
+		if err := model.DB.First(&replyTo, req.ReplyToCommentID).Error; err != nil || replyTo.Status == model.CommunityCommentStatusDeleted || replyTo.PostID != postID {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "回复对象不存在"})
+			return
+		}
+		replyToUserID = replyTo.UserID
+		if replyTo.ParentID == 0 {
+			parentID = replyTo.ID
+		} else {
+			parentID = replyTo.ParentID
+		}
+		var root model.CommunityPostComment
+		if err := model.DB.Select("id, parent_id, status").First(&root, parentID).Error; err != nil || root.ParentID != 0 || root.Status == model.CommunityCommentStatusDeleted {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "回复对象不存在"})
+			return
+		}
+	}
+
+	comment := model.CommunityPostComment{
+		PostID:        postID,
+		UserID:        userID,
+		ParentID:      parentID,
+		ReplyToUserID: replyToUserID,
+		Content:       req.Content,
+		Status:        model.CommunityCommentStatusApproved,
+	}
+
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&comment).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.CommunityPost{}).Where("id = ?", postID).UpdateColumn("comments_count", gorm.Expr("comments_count + 1")).Error
+	})
+	if err != nil {
+		log.Printf("CreateCommunityPostComment failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "发布失败"})
+		return
+	}
+
+	nicknameMap, avatarMap := buildNicknameAvatarMap([]uint64{userID, replyToUserID})
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": toCommunityCommentResponse(comment, nicknameMap, avatarMap)})
+}
+
+// DeleteCommunityPostComment 教学端：删除评论（含删除其下回复）
+func DeleteCommunityPostComment(c *gin.Context) {
+	if model.DB == nil {
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": nil})
+		return
+	}
+	userID, ok := currentUserID(c)
+	if !ok || userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "未登录"})
+		return
+	}
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	if id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+		return
+	}
+
+	var comment model.CommunityPostComment
+	if err := model.DB.First(&comment, id).Error; err != nil || comment.Status == model.CommunityCommentStatusDeleted {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "评论不存在"})
+		return
+	}
+	if comment.UserID != userID && !isAdminAccount(c) {
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": "无权限"})
+		return
+	}
+
+	postID := comment.PostID
+	delta := int64(1)
+	if comment.ParentID == 0 {
+		var cnt int64
+		_ = model.DB.Model(&model.CommunityPostComment{}).Where("post_id = ? AND parent_id = ? AND status <> ?", postID, comment.ID, model.CommunityCommentStatusDeleted).Count(&cnt).Error
+		delta = 1 + cnt
+	}
+
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.CommunityPostComment{}).Where("id = ? AND status <> ?", id, model.CommunityCommentStatusDeleted).Update("status", model.CommunityCommentStatusDeleted).Error; err != nil {
+			return err
+		}
+		if comment.ParentID == 0 {
+			if err := tx.Model(&model.CommunityPostComment{}).Where("post_id = ? AND parent_id = ? AND status <> ?", postID, comment.ID, model.CommunityCommentStatusDeleted).Update("status", model.CommunityCommentStatusDeleted).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&model.CommunityPost{}).Where("id = ?", postID).UpdateColumn("comments_count", gorm.Expr("CASE WHEN comments_count >= ? THEN comments_count - ? ELSE 0 END", delta, delta)).Error
+	})
+	if err != nil {
+		log.Printf("DeleteCommunityPostComment failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": true})
+}
+
+type adminCommunityCommentListResponse struct {
+	List     []communityCommentResponse `json:"list"`
+	Total    int64                      `json:"total"`
+	Page     int                        `json:"page"`
+	PageSize int                        `json:"page_size"`
+}
+
+// AdminGetCommunityComments 后台：评论列表
+func AdminGetCommunityComments(c *gin.Context) {
+	if !requireAdminAccount(c) {
+		return
+	}
+	if model.DB == nil {
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": adminCommunityCommentListResponse{List: []communityCommentResponse{}, Total: 0, Page: 1, PageSize: 20}})
+		return
+	}
+
+	page, pageSize := getPagination(c)
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	postID, _ := strconv.ParseUint(strings.TrimSpace(c.Query("post_id")), 10, 64)
+
+	query := model.DB.Model(&model.CommunityPostComment{}).Where("status <> ?", model.CommunityCommentStatusDeleted)
+	if postID > 0 {
+		query = query.Where("post_id = ?", postID)
+	}
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("content LIKE ?", like)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取评论失败"})
+		return
+	}
+
+	var comments []model.CommunityPostComment
+	if err := query.Order("created_at desc").Limit(pageSize).Offset((page - 1) * pageSize).Find(&comments).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取评论失败"})
+		return
+	}
+
+	nicknameMap, avatarMap := buildNicknameAvatarMap(extractCommentUserIDs(comments))
+	resp := make([]communityCommentResponse, 0, len(comments))
+	for _, item := range comments {
+		resp = append(resp, toCommunityCommentResponse(item, nicknameMap, avatarMap))
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": adminCommunityCommentListResponse{List: resp, Total: total, Page: page, PageSize: pageSize}})
+}
+
+// AdminDeleteCommunityComment 后台：删除评论
+func AdminDeleteCommunityComment(c *gin.Context) {
+	if !requireAdminAccount(c) {
+		return
+	}
+	DeleteCommunityPostComment(c)
+}
+
+type adminSensitiveWordsResponse struct {
+	Words []string `json:"words"`
+}
+
+// AdminGetCommunitySensitiveWords 后台：敏感词列表
+func AdminGetCommunitySensitiveWords(c *gin.Context) {
+	if !requireAdminAccount(c) {
+		return
+	}
+	words := loadSensitiveWords(true)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": adminSensitiveWordsResponse{Words: words}})
+}
+
+type adminSensitiveWordsRequest struct {
+	Words []string `json:"words"`
+}
+
+// AdminUpdateCommunitySensitiveWords 后台：覆盖更新敏感词
+func AdminUpdateCommunitySensitiveWords(c *gin.Context) {
+	if !requireAdminAccount(c) {
+		return
+	}
+	if model.DB == nil {
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": nil})
+		return
+	}
+	var req adminSensitiveWordsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+		return
+	}
+	seen := map[string]struct{}{}
+	words := make([]string, 0)
+	for _, item := range req.Words {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if len([]rune(item)) > 64 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "敏感词过长"})
+			return
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		words = append(words, item)
+	}
+	if len(words) > 500 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "敏感词数量过多"})
+		return
+	}
+
+	now := time.Now()
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DELETE FROM community_sensitive_words").Error; err != nil {
+			return err
+		}
+		if len(words) == 0 {
+			return nil
+		}
+		rows := make([]model.CommunitySensitiveWord, 0, len(words))
+		for _, w := range words {
+			rows = append(rows, model.CommunitySensitiveWord{Word: w, CreatedAt: now})
+		}
+		return tx.Create(&rows).Error
+	})
+	if err != nil {
+		log.Printf("AdminUpdateCommunitySensitiveWords failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "保存失败"})
+		return
+	}
+
+	loadSensitiveWords(true)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": adminSensitiveWordsResponse{Words: words}})
 }
 
 // AdminGetCommunityPosts 后台：帖子管理列表

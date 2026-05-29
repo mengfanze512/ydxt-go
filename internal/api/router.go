@@ -88,6 +88,9 @@ func InitRouter() *gin.Engine {
 				communityGroup.POST("/posts", CreateCommunityPost)
 				communityGroup.PUT("/posts/:id", UpdateCommunityPost)
 				communityGroup.DELETE("/posts/:id", DeleteCommunityPost)
+				communityGroup.GET("/posts/:id/comments", GetCommunityPostComments)
+				communityGroup.POST("/posts/:id/comments", CreateCommunityPostComment)
+				communityGroup.DELETE("/comments/:id", DeleteCommunityPostComment)
 				communityGroup.POST("/posts/:id/like", LikeCommunityPost)
 				communityGroup.DELETE("/posts/:id/like", UnlikeCommunityPost)
 				communityGroup.POST("/posts/:id/favorite", FavoriteCommunityPost)
@@ -169,6 +172,10 @@ func InitRouter() *gin.Engine {
 				adminGroup.POST("/community/posts/:id/reject", AdminRejectCommunityPost)
 				adminGroup.PATCH("/community/posts/:id/flags", AdminUpdateCommunityPostFlags)
 				adminGroup.DELETE("/community/posts/:id", AdminDeleteCommunityPost)
+				adminGroup.GET("/community/comments", AdminGetCommunityComments)
+				adminGroup.DELETE("/community/comments/:id", AdminDeleteCommunityComment)
+				adminGroup.GET("/community/sensitive-words", AdminGetCommunitySensitiveWords)
+				adminGroup.PUT("/community/sensitive-words", AdminUpdateCommunitySensitiveWords)
 			}
 
 			// 管理端复用的非 /admin 前缀接口
