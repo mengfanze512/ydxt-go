@@ -1,6 +1,7 @@
 package api
 
 import (
+	"math"
 	"net/http"
 	"strings"
 	"ydxt-go/internal/model"
@@ -9,14 +10,15 @@ import (
 )
 
 type adminSheetMusicRequest struct {
-	Title      string `json:"title" binding:"required"`
-	Author     string `json:"author"`
-	Instrument string `json:"instrument"`
-	Difficulty int8   `json:"difficulty"`
-	IsFree     int8   `json:"is_free"`
-	CoverURL   string `json:"cover_url"`
-	ContentURL string `json:"content_url"`
-	Downloads  int    `json:"downloads"`
+	Title      string  `json:"title" binding:"required"`
+	Author     string  `json:"author"`
+	Instrument string  `json:"instrument"`
+	Difficulty int8    `json:"difficulty"`
+	IsFree     int8    `json:"is_free"`
+	Price      float64 `json:"price"`
+	CoverURL   string  `json:"cover_url"`
+	ContentURL string  `json:"content_url"`
+	Downloads  int     `json:"downloads"`
 }
 
 func normalizeDifficulty(difficulty int8) int8 {
@@ -36,6 +38,16 @@ func normalizeSheetFree(isFree int8) int8 {
 	return 1
 }
 
+func normalizeSheetPrice(price float64, isFree int8) int {
+	if normalizeSheetFree(isFree) == 1 {
+		return 0
+	}
+	if price < 0 {
+		price = 0
+	}
+	return int(math.Round(price * 100))
+}
+
 // AdminGetSheetMusics 获取后台曲谱列表
 func AdminGetSheetMusics(c *gin.Context) {
 	if !requireAdminAccount(c) {
@@ -49,7 +61,7 @@ func AdminGetSheetMusics(c *gin.Context) {
 	if isLegacySheetMusicSchema() {
 		var sheets []legacySheetMusicRecord
 		query := model.DB.Table("sheet_musics").
-			Select("id, title, instrument, difficulty, img_url, xml_url, status, is_deleted").
+			Select(legacySheetMusicSelectFields()).
 			Where("is_deleted = ?", 0).
 			Order("created_at desc")
 		if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
@@ -113,7 +125,7 @@ func AdminGetSheetMusicDetail(c *gin.Context) {
 	if isLegacySheetMusicSchema() {
 		var sheet legacySheetMusicRecord
 		if err := model.DB.Table("sheet_musics").
-			Select("id, title, instrument, difficulty, img_url, xml_url, status, is_deleted").
+			Select(legacySheetMusicSelectFields()).
 			Where("id = ? AND is_deleted = ?", id, 0).
 			First(&sheet).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "曲谱不存在"})
@@ -143,6 +155,10 @@ func AdminCreateSheetMusic(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
 		return
 	}
+	if normalizeSheetFree(req.IsFree) == 0 && normalizeSheetPrice(req.Price, req.IsFree) <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "付费曲谱价格必须大于0"})
+		return
+	}
 
 	if isLegacySheetMusicSchema() {
 		firstContent := firstSheetContentURL(req.ContentURL)
@@ -161,6 +177,9 @@ func AdminCreateSheetMusic(c *gin.Context) {
 			"status":     1,
 			"is_deleted": 0,
 		}
+		if hasSheetMusicColumn("price") {
+			data["price"] = normalizeSheetPrice(req.Price, req.IsFree)
+		}
 		if err := model.DB.Table("sheet_musics").Create(data).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增曲谱失败"})
 			return
@@ -175,6 +194,7 @@ func AdminCreateSheetMusic(c *gin.Context) {
 		Instrument: strings.TrimSpace(req.Instrument),
 		Difficulty: normalizeDifficulty(req.Difficulty),
 		IsFree:     normalizeSheetFree(req.IsFree),
+		Price:      normalizeSheetPrice(req.Price, req.IsFree),
 		CoverURL:   strings.TrimSpace(req.CoverURL),
 		ContentURL: strings.TrimSpace(req.ContentURL),
 		Downloads:  max(req.Downloads, 0),
@@ -204,6 +224,10 @@ func AdminUpdateSheetMusic(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
 		return
 	}
+	if normalizeSheetFree(req.IsFree) == 0 && normalizeSheetPrice(req.Price, req.IsFree) <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "付费曲谱价格必须大于0"})
+		return
+	}
 
 	if isLegacySheetMusicSchema() {
 		firstContent := firstSheetContentURL(req.ContentURL)
@@ -219,6 +243,9 @@ func AdminUpdateSheetMusic(c *gin.Context) {
 			"difficulty": normalizeDifficulty(req.Difficulty),
 			"img_url":    coverURL,
 			"xml_url":    contentURL,
+		}
+		if hasSheetMusicColumn("price") {
+			updates["price"] = normalizeSheetPrice(req.Price, req.IsFree)
 		}
 		result := model.DB.Table("sheet_musics").Where("id = ? AND is_deleted = ?", id, 0).Updates(updates)
 		if result.Error != nil {
@@ -239,6 +266,7 @@ func AdminUpdateSheetMusic(c *gin.Context) {
 		"instrument":  strings.TrimSpace(req.Instrument),
 		"difficulty":  normalizeDifficulty(req.Difficulty),
 		"is_free":     normalizeSheetFree(req.IsFree),
+		"price":       normalizeSheetPrice(req.Price, req.IsFree),
 		"cover_url":   strings.TrimSpace(req.CoverURL),
 		"content_url": strings.TrimSpace(req.ContentURL),
 		"downloads":   max(req.Downloads, 0),

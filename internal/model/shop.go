@@ -26,6 +26,7 @@ func (ShopGoods) TableName() string {
 type CartItem struct {
 	ID        uint64    `gorm:"primaryKey" json:"id"`
 	UserID    uint64    `gorm:"column:user_id;index" json:"user_id"`
+	ItemType  string    `gorm:"column:item_type;type:varchar(16);default:'shop';index" json:"item_type"`
 	GoodsID   uint64    `gorm:"column:goods_id;index" json:"goods_id"`
 	Spec      string    `gorm:"column:spec;type:varchar(64)" json:"spec"`
 	Quantity  int       `gorm:"column:quantity;type:int;default:1" json:"quantity"`

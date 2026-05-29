@@ -77,6 +77,8 @@ func InitRouter() *gin.Engine {
 				shopGroup.POST("/cart", AddToCart)
 				shopGroup.PATCH("/cart/:id", UpdateCartItem)
 				shopGroup.DELETE("/cart/:id", DeleteCartItem)
+				shopGroup.POST("/orders", CreateShopOrder)
+				shopGroup.GET("/orders", GetMyOrders)
 			}
 
 			// === 仅限教师操作的接口 ===

@@ -10,6 +10,7 @@ type SheetMusic struct {
 	Instrument string    `gorm:"column:instrument;type:varchar(32)" json:"instrument"`
 	Difficulty int8      `gorm:"column:difficulty;type:tinyint" json:"difficulty"`
 	IsFree     int8      `gorm:"column:is_free;type:tinyint;default:1" json:"is_free"` // 1=免费, 0=收费
+	Price      int       `gorm:"column:price;type:int unsigned;default:0" json:"price"`
 	CoverURL   string    `gorm:"column:cover_url;type:varchar(255)" json:"cover_url"`
 	ContentURL string    `gorm:"column:content_url;type:text" json:"content_url"` // 可存 JSON 数组
 	Downloads  int       `gorm:"column:downloads;type:int;default:0" json:"downloads"`

@@ -17,27 +17,29 @@ var (
 )
 
 type sheetMusicResponse struct {
-	ID         uint64   `json:"id"`
-	Title      string   `json:"title"`
-	Author     string   `json:"author"`
-	Instrument string   `json:"instrument"`
-	Difficulty int8     `json:"difficulty"`
-	IsFree     int8     `json:"is_free"`
-	CoverURL   string   `json:"cover_url"`
-	ContentURL string   `json:"content_url"`
+	ID          uint64   `json:"id"`
+	Title       string   `json:"title"`
+	Author      string   `json:"author"`
+	Instrument  string   `json:"instrument"`
+	Difficulty  int8     `json:"difficulty"`
+	IsFree      int8     `json:"is_free"`
+	Price       float64  `json:"price"`
+	CoverURL    string   `json:"cover_url"`
+	ContentURL  string   `json:"content_url"`
 	ContentURLs []string `json:"content_urls"`
-	Downloads  int      `json:"downloads"`
+	Downloads   int      `json:"downloads"`
 }
 
 type legacySheetMusicRecord struct {
-	ID        uint64 `gorm:"column:id"`
-	Title     string `gorm:"column:title"`
+	ID         uint64 `gorm:"column:id"`
+	Title      string `gorm:"column:title"`
 	Instrument string `gorm:"column:instrument"`
 	Difficulty int8   `gorm:"column:difficulty"`
-	ImgURL    string `gorm:"column:img_url"`
-	XMLURL    string `gorm:"column:xml_url"`
-	Status    int8   `gorm:"column:status"`
-	IsDeleted int8   `gorm:"column:is_deleted"`
+	Price      int    `gorm:"column:price"`
+	ImgURL     string `gorm:"column:img_url"`
+	XMLURL     string `gorm:"column:xml_url"`
+	Status     int8   `gorm:"column:status"`
+	IsDeleted  int8   `gorm:"column:is_deleted"`
 }
 
 func loadSheetMusicColumns() {
@@ -63,6 +65,14 @@ func hasSheetMusicColumn(column string) bool {
 
 func isLegacySheetMusicSchema() bool {
 	return hasSheetMusicColumn("img_url") && !hasSheetMusicColumn("cover_url")
+}
+
+func legacySheetMusicSelectFields() string {
+	fields := []string{"id", "title", "instrument", "difficulty", "img_url", "xml_url", "status", "is_deleted"}
+	if hasSheetMusicColumn("price") {
+		fields = append(fields, "price")
+	}
+	return strings.Join(fields, ", ")
 }
 
 func firstSheetMusicNonEmpty(values ...string) string {
@@ -105,6 +115,7 @@ func toSheetMusicResponse(item model.SheetMusic) sheetMusicResponse {
 		Instrument:  item.Instrument,
 		Difficulty:  item.Difficulty,
 		IsFree:      item.IsFree,
+		Price:       formatGoodsPrice(item.Price),
 		CoverURL:    item.CoverURL,
 		ContentURL:  item.ContentURL,
 		ContentURLs: parseSheetContentURLs(item.ContentURL),
@@ -115,13 +126,18 @@ func toSheetMusicResponse(item model.SheetMusic) sheetMusicResponse {
 func toLegacySheetMusicResponse(item legacySheetMusicRecord) sheetMusicResponse {
 	contentURL := strings.TrimSpace(item.XMLURL)
 	coverURL := firstSheetMusicNonEmpty(item.ImgURL, contentURL)
+	isFree := int8(1)
+	if item.Price > 0 {
+		isFree = 0
+	}
 	return sheetMusicResponse{
 		ID:          item.ID,
 		Title:       item.Title,
 		Author:      "",
 		Instrument:  item.Instrument,
 		Difficulty:  item.Difficulty,
-		IsFree:      1,
+		IsFree:      isFree,
+		Price:       formatGoodsPrice(item.Price),
 		CoverURL:    coverURL,
 		ContentURL:  contentURL,
 		ContentURLs: parseSheetContentURLs(contentURL),
@@ -139,7 +155,7 @@ func GetSheetMusics(c *gin.Context) {
 	if isLegacySheetMusicSchema() {
 		var sheets []legacySheetMusicRecord
 		query := model.DB.Table("sheet_musics").
-			Select("id, title, instrument, difficulty, img_url, xml_url, status, is_deleted").
+			Select(legacySheetMusicSelectFields()).
 			Where("is_deleted = ?", 0).
 			Where("status = ?", 1).
 			Order("created_at desc")
@@ -192,7 +208,7 @@ func GetSheetMusicDetail(c *gin.Context) {
 	if isLegacySheetMusicSchema() {
 		var sheet legacySheetMusicRecord
 		if err := model.DB.Table("sheet_musics").
-			Select("id, title, instrument, difficulty, img_url, xml_url, status, is_deleted").
+			Select(legacySheetMusicSelectFields()).
 			Where("id = ? AND is_deleted = ? AND status = ?", id, 0, 1).
 			First(&sheet).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "曲谱不存在"})

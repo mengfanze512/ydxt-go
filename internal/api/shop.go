@@ -22,15 +22,33 @@ type shopGoodsResponse struct {
 }
 
 type cartItemResponse struct {
-	ID        uint64  `json:"id"`
-	GoodsID   uint64  `json:"goods_id"`
-	Title     string  `json:"title"`
-	Spec      string  `json:"spec"`
-	Price     float64 `json:"price"`
-	Quantity  int     `json:"quantity"`
-	Image     string  `json:"image"`
-	Stock     int     `json:"stock"`
-	Category  string  `json:"category"`
+	ID       uint64  `json:"id"`
+	ItemType string  `json:"item_type"`
+	GoodsID  uint64  `json:"goods_id"`
+	Title    string  `json:"title"`
+	Spec     string  `json:"spec"`
+	Price    float64 `json:"price"`
+	Quantity int     `json:"quantity"`
+	Image    string  `json:"image"`
+	Stock    int     `json:"stock"`
+	Category string  `json:"category"`
+}
+
+const (
+	cartItemTypeShop   = "shop"
+	cartItemTypeCourse = "course"
+	cartItemTypeSheet  = "sheet"
+)
+
+func normalizeCartItemType(raw string) string {
+	switch raw {
+	case cartItemTypeCourse:
+		return cartItemTypeCourse
+	case cartItemTypeSheet:
+		return cartItemTypeSheet
+	default:
+		return cartItemTypeShop
+	}
 }
 
 func formatGoodsPrice(price int) float64 {
@@ -112,10 +130,58 @@ func GetCartItems(c *gin.Context) {
 		return
 	}
 
+	sheetPriceSelect := "COALESCE(s.price, 0)"
+	sheetCoverSelect := "COALESCE(s.cover_url, '')"
+	sheetJoinCondition := "LEFT JOIN sheet_musics s ON c.item_type = 'sheet' AND s.id = c.goods_id"
+	if isLegacySheetMusicSchema() {
+		if hasSheetMusicColumn("price") {
+			sheetPriceSelect = "COALESCE(s.price, 0)"
+		} else {
+			sheetPriceSelect = "0"
+		}
+		sheetCoverSelect = "COALESCE(s.img_url, s.xml_url, '')"
+		sheetJoinCondition = "LEFT JOIN sheet_musics s ON c.item_type = 'sheet' AND s.id = c.goods_id AND s.is_deleted = 0"
+	}
+
 	var items []cartItemResponse
 	if err := model.DB.Table("cart_items c").
-		Select("c.id, c.goods_id, c.spec, c.quantity, g.title, g.price, g.cover_url as image, g.stock, g.category").
-		Joins("LEFT JOIN shop_goods g ON g.id = c.goods_id").
+		Select(`
+			c.id,
+			c.item_type,
+			c.goods_id,
+			c.spec,
+			c.quantity,
+			CASE
+				WHEN c.item_type = 'shop' THEN g.title
+				WHEN c.item_type = 'course' THEN co.title
+				WHEN c.item_type = 'sheet' THEN s.title
+				ELSE ''
+			END AS title,
+			CASE
+				WHEN c.item_type = 'shop' THEN g.price
+				WHEN c.item_type = 'course' THEN CAST(ROUND(COALESCE(co.price, 0) * 100) AS SIGNED)
+				WHEN c.item_type = 'sheet' THEN `+sheetPriceSelect+`
+				ELSE 0
+			END AS price,
+			CASE
+				WHEN c.item_type = 'shop' THEN COALESCE(g.cover_url, '')
+				WHEN c.item_type = 'course' THEN COALESCE(co.cover, '')
+				WHEN c.item_type = 'sheet' THEN `+sheetCoverSelect+`
+				ELSE ''
+			END AS image,
+			CASE
+				WHEN c.item_type = 'shop' THEN COALESCE(g.stock, 0)
+				ELSE 1
+			END AS stock,
+			CASE
+				WHEN c.item_type = 'shop' THEN COALESCE(g.category, '')
+				WHEN c.item_type = 'course' THEN '课程'
+				WHEN c.item_type = 'sheet' THEN '曲谱'
+				ELSE ''
+			END AS category`).
+		Joins("LEFT JOIN shop_goods g ON c.item_type = 'shop' AND g.id = c.goods_id").
+		Joins("LEFT JOIN courses co ON c.item_type = 'course' AND co.id = c.goods_id").
+		Joins(sheetJoinCondition).
 		Where("c.user_id = ?", userID).
 		Order("c.id desc").
 		Scan(&items).Error; err != nil {
@@ -144,6 +210,7 @@ func AddToCart(c *gin.Context) {
 	}
 
 	var req struct {
+		ItemType string `json:"item_type"`
 		GoodsID  uint64 `json:"goods_id" binding:"required"`
 		Spec     string `json:"spec"`
 		Quantity int    `json:"quantity" binding:"required,min=1"`
@@ -154,18 +221,64 @@ func AddToCart(c *gin.Context) {
 		return
 	}
 
-	var goods model.ShopGoods
-	if err := model.DB.Where("id = ? AND status = ?", req.GoodsID, 1).First(&goods).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "商品不存在"})
-		return
+	itemType := normalizeCartItemType(req.ItemType)
+	quantity := req.Quantity
+	spec := req.Spec
+	if itemType != cartItemTypeShop {
+		quantity = 1
+		spec = ""
+	}
+
+	switch itemType {
+	case cartItemTypeShop:
+		var goods model.ShopGoods
+		if err := model.DB.Where("id = ? AND status = ?", req.GoodsID, 1).First(&goods).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "商品不存在"})
+			return
+		}
+	case cartItemTypeCourse:
+		var course model.Course
+		if err := model.DB.Where("id = ? AND status = ?", req.GoodsID, 1).First(&course).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "课程不存在"})
+			return
+		}
+	case cartItemTypeSheet:
+		if isLegacySheetMusicSchema() {
+			var sheet legacySheetMusicRecord
+			if err := model.DB.Table("sheet_musics").
+				Select(legacySheetMusicSelectFields()).
+				Where("id = ? AND is_deleted = ? AND status = ?", req.GoodsID, 0, 1).
+				First(&sheet).Error; err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "曲谱不存在"})
+				return
+			}
+			if hasSheetMusicColumn("price") && sheet.Price < 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "曲谱价格异常"})
+				return
+			}
+			break
+		}
+		var sheet model.SheetMusic
+		if err := model.DB.Where("id = ?", req.GoodsID).First(&sheet).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "曲谱不存在"})
+			return
+		}
+		if normalizeSheetFree(sheet.IsFree) == 0 && sheet.Price <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "该曲谱价格未配置，暂不可加入购物车"})
+			return
+		}
 	}
 
 	var item model.CartItem
-	err := model.DB.Where("user_id = ? AND goods_id = ? AND spec = ?", userID, req.GoodsID, req.Spec).First(&item).Error
+	err := model.DB.Where("user_id = ? AND item_type = ? AND goods_id = ? AND spec = ?", userID, itemType, req.GoodsID, spec).First(&item).Error
 	if err == nil {
-		item.Quantity += req.Quantity
-		if item.Quantity > 99 {
-			item.Quantity = 99
+		if itemType == cartItemTypeShop {
+			item.Quantity += quantity
+			if item.Quantity > 99 {
+				item.Quantity = 99
+			}
+		} else {
+			item.Quantity = 1
 		}
 		if err := model.DB.Save(&item).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "加入购物车失败"})
@@ -177,9 +290,10 @@ func AddToCart(c *gin.Context) {
 
 	item = model.CartItem{
 		UserID:   userID.(uint64),
+		ItemType: itemType,
 		GoodsID:  req.GoodsID,
-		Spec:     req.Spec,
-		Quantity: req.Quantity,
+		Spec:     spec,
+		Quantity: quantity,
 	}
 
 	if err := model.DB.Create(&item).Error; err != nil {
@@ -212,9 +326,20 @@ func UpdateCartItem(c *gin.Context) {
 		return
 	}
 
+	var item model.CartItem
+	if err := model.DB.Where("id = ? AND user_id = ?", id, userID).First(&item).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "购物车商品不存在"})
+		return
+	}
+
+	quantity := req.Quantity
+	if normalizeCartItemType(item.ItemType) != cartItemTypeShop {
+		quantity = 1
+	}
+
 	result := model.DB.Model(&model.CartItem{}).
 		Where("id = ? AND user_id = ?", id, userID).
-		Update("quantity", req.Quantity)
+		Update("quantity", quantity)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新购物车失败"})
 		return
