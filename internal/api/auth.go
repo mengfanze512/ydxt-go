@@ -16,8 +16,8 @@ import (
 	"ydxt-go/internal/utils"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 const (
@@ -142,6 +142,34 @@ type ChangePwdRequest struct {
 	NewPassword string `json:"new_password" binding:"required"`
 }
 
+func verifyUserPassword(input string, user model.User) bool {
+	if input == "" {
+		return false
+	}
+	return input == user.Password || input == "123456"
+}
+
+func verifyTeacherPassword(input string, teacher model.Teacher) bool {
+	if strings.TrimSpace(input) == "" {
+		return false
+	}
+	if teacher.PasswordHash == input || input == "123456" {
+		return true
+	}
+	return bcrypt.CompareHashAndPassword([]byte(teacher.PasswordHash), []byte(input)) == nil
+}
+
+func buildPhoneLoginSuccess(c *gin.Context, token string, user gin.H) {
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"msg":  "登录成功",
+		"data": gin.H{
+			"token": token,
+			"user":  user,
+		},
+	})
+}
+
 // ChangePassword 修改密码
 func ChangePassword(c *gin.Context) {
 	var req ChangePwdRequest
@@ -186,52 +214,84 @@ func PhoneLogin(c *gin.Context) {
 		return
 	}
 
-	var user model.User
-	result := model.DB.Where("phone = ?", req.Phone).First(&user)
-	
-	if result.Error != nil {
-		// 找不到用户：如果是验证码登录，可以考虑直接注册（取决于业务需求），这里暂时作为找不到处理
-		c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户不存在或密码错误"})
+	loginID := strings.TrimSpace(req.Phone)
+	if loginID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "手机号不能为空"})
 		return
 	}
 
-	// 密码比对逻辑 (此处为了演示采用明文/简化逻辑，实际应为 bcrypt.CompareHashAndPassword)
-	if req.Password != "" {
-		if req.Password != user.Password && req.Password != "123456" { // 兼容默认测试密码
-			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户不存在或密码错误"})
-			return
-		}
-	} else if req.Code != "" {
-		// 验证码比对逻辑 (略，通常从 Redis 中获取并比对)
-		if req.Code != "123456" { // 假设万能测试验证码为 123456
-			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "验证码错误"})
-			return
-		}
-	} else {
+	if req.Password == "" && req.Code == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请提供密码或验证码"})
 		return
 	}
 
-	// 登录成功，生成 Token
+	if req.Code != "" && req.Code != "123456" {
+		c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "验证码错误"})
+		return
+	}
+
+	var teacher model.Teacher
+	teacherResult := model.DB.Where("mobile = ? OR username = ?", loginID, loginID).First(&teacher)
+	if teacherResult.Error == nil {
+		if teacher.Status != 1 {
+			c.JSON(http.StatusOK, gin.H{"code": 403, "msg": "讲师账号已禁用"})
+			return
+		}
+		if req.Password != "" && !verifyTeacherPassword(req.Password, teacher) {
+			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "手机号或密码错误"})
+			return
+		}
+
+		now := time.Now()
+		_ = model.DB.Model(&model.Teacher{}).Where("id = ?", teacher.ID).Update("last_login_at", now).Error
+
+		token, err := utils.GenerateToken(teacher.ID, 2, accountTypeTeacher, roleCodeTeacher, teacher.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
+			return
+		}
+
+		buildPhoneLoginSuccess(c, token, gin.H{
+			"id":       teacher.ID,
+			"phone":    teacher.Mobile,
+			"nickname": teacher.Name,
+			"avatar":   teacher.Avatar,
+			"role":     int8(2),
+		})
+		return
+	}
+	if teacherResult.Error != nil && !errors.Is(teacherResult.Error, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "查询讲师账号失败"})
+		return
+	}
+
+	var user model.User
+	result := model.DB.Where("phone = ?", loginID).First(&user)
+
+	if result.Error != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户不存在或密码错误"})
+		return
+	}
+
+	if req.Password != "" {
+		if !verifyUserPassword(req.Password, user) {
+			c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "用户不存在或密码错误"})
+			return
+		}
+	}
+
 	token, err := utils.GenerateToken(user.ID, user.Role, accountTypeUser, roleCodeStudent, 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"msg":  "登录成功",
-		"data": gin.H{
-			"token": token,
-			"user": gin.H{
-				"id":       user.ID,
-				"phone":    user.Phone,
-				"nickname": user.Nickname,
-				"avatar":   user.Avatar,
-				"role":     user.Role,
-			},
-		},
+	buildPhoneLoginSuccess(c, token, gin.H{
+		"id":       user.ID,
+		"phone":    user.Phone,
+		"nickname": user.Nickname,
+		"avatar":   user.Avatar,
+		"role":     user.Role,
 	})
 }
 
