@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"ydxt-go/internal/model"
 
 	"github.com/gin-gonic/gin"
@@ -130,67 +131,78 @@ func GetCartItems(c *gin.Context) {
 		return
 	}
 
-	sheetPriceSelect := "COALESCE(s.price, 0)"
-	sheetCoverSelect := "COALESCE(s.cover_url, '')"
-	sheetJoinCondition := "LEFT JOIN sheet_musics s ON c.item_type = 'sheet' AND s.id = c.goods_id"
-	if isLegacySheetMusicSchema() {
-		if hasSheetMusicColumn("price") {
-			sheetPriceSelect = "COALESCE(s.price, 0)"
-		} else {
-			sheetPriceSelect = "0"
-		}
-		sheetCoverSelect = "COALESCE(s.img_url, s.xml_url, '')"
-		sheetJoinCondition = "LEFT JOIN sheet_musics s ON c.item_type = 'sheet' AND s.id = c.goods_id AND s.is_deleted = 0"
-	}
-
-	var items []cartItemResponse
-	if err := model.DB.Table("cart_items c").
-		Select(`
-			c.id,
-			c.item_type,
-			c.goods_id,
-			c.spec,
-			c.quantity,
-			CASE
-				WHEN c.item_type = 'shop' THEN g.title
-				WHEN c.item_type = 'course' THEN co.title
-				WHEN c.item_type = 'sheet' THEN s.title
-				ELSE ''
-			END AS title,
-			CASE
-				WHEN c.item_type = 'shop' THEN g.price
-				WHEN c.item_type = 'course' THEN CAST(ROUND(COALESCE(co.price, 0) * 100) AS SIGNED)
-				WHEN c.item_type = 'sheet' THEN `+sheetPriceSelect+`
-				ELSE 0
-			END AS price,
-			CASE
-				WHEN c.item_type = 'shop' THEN COALESCE(g.cover_url, '')
-				WHEN c.item_type = 'course' THEN COALESCE(co.cover, '')
-				WHEN c.item_type = 'sheet' THEN `+sheetCoverSelect+`
-				ELSE ''
-			END AS image,
-			CASE
-				WHEN c.item_type = 'shop' THEN COALESCE(g.stock, 0)
-				ELSE 1
-			END AS stock,
-			CASE
-				WHEN c.item_type = 'shop' THEN COALESCE(g.category, '')
-				WHEN c.item_type = 'course' THEN '课程'
-				WHEN c.item_type = 'sheet' THEN '曲谱'
-				ELSE ''
-			END AS category`).
-		Joins("LEFT JOIN shop_goods g ON c.item_type = 'shop' AND g.id = c.goods_id").
-		Joins("LEFT JOIN courses co ON c.item_type = 'course' AND co.id = c.goods_id").
-		Joins(sheetJoinCondition).
-		Where("c.user_id = ?", userID).
-		Order("c.id desc").
-		Scan(&items).Error; err != nil {
+	var cartItems []model.CartItem
+	if err := model.DB.Where("user_id = ?", userID).Order("id desc").Find(&cartItems).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取购物车失败"})
 		return
 	}
 
-	for i := range items {
-		items[i].Price = formatGoodsPrice(int(items[i].Price))
+	items := make([]cartItemResponse, 0, len(cartItems))
+	for _, cartItem := range cartItems {
+		itemType := normalizeCartItemType(cartItem.ItemType)
+		item := cartItemResponse{
+			ID:       cartItem.ID,
+			ItemType: itemType,
+			GoodsID:  cartItem.GoodsID,
+			Spec:     cartItem.Spec,
+			Quantity: cartItem.Quantity,
+		}
+
+		switch itemType {
+		case cartItemTypeShop:
+			var goods model.ShopGoods
+			if err := model.DB.Where("id = ? AND status = ?", cartItem.GoodsID, 1).First(&goods).Error; err != nil {
+				continue
+			}
+			item.Title = goods.Title
+			item.Price = formatGoodsPrice(goods.Price)
+			item.Image = strings.TrimSpace(goods.CoverURL)
+			item.Stock = goods.Stock
+			item.Category = goods.Category
+		case cartItemTypeCourse:
+			var course model.Course
+			if err := model.DB.Where("id = ? AND status = ?", cartItem.GoodsID, 1).First(&course).Error; err != nil {
+				continue
+			}
+			item.Title = course.Title
+			item.Price = course.Price
+			item.Image = strings.TrimSpace(course.Cover)
+			item.Stock = 1
+			item.Category = "课程"
+			item.Quantity = 1
+			item.Spec = ""
+		case cartItemTypeSheet:
+			if isLegacySheetMusicSchema() {
+				var sheet legacySheetMusicRecord
+				if err := model.DB.Table("sheet_musics").
+					Select(legacySheetMusicSelectFields()).
+					Where("id = ? AND is_deleted = ? AND status = ?", cartItem.GoodsID, 0, 1).
+					First(&sheet).Error; err != nil {
+					continue
+				}
+				sheetData := toLegacySheetMusicResponse(sheet)
+				item.Title = sheetData.Title
+				item.Price = sheetData.Price
+				item.Image = strings.TrimSpace(sheetData.CoverURL)
+			} else {
+				var sheet model.SheetMusic
+				if err := model.DB.Where("id = ?", cartItem.GoodsID).First(&sheet).Error; err != nil {
+					continue
+				}
+				sheetData := toSheetMusicResponse(sheet)
+				item.Title = sheetData.Title
+				item.Price = sheetData.Price
+				item.Image = strings.TrimSpace(sheetData.CoverURL)
+			}
+			item.Stock = 1
+			item.Category = "曲谱"
+			item.Quantity = 1
+			item.Spec = ""
+		default:
+			continue
+		}
+
+		items = append(items, item)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": items})
