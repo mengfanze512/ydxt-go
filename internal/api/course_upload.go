@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -88,8 +90,8 @@ func loadStorageConfig() (storageConfig, error) {
 		}
 	}
 
-	if cfg.SecretID == "" || cfg.SecretKey == "" || cfg.EnvID == "" {
-		return cfg, errors.New("缺少 COS_SECRET_ID/KEY 或 CLOUD_ENV_ID/TCB_ENV 配置")
+	if cfg.EnvID == "" {
+		return cfg, errors.New("缺少 CLOUD_ENV_ID/TCB_ENV 配置")
 	}
 
 	return cfg, nil
@@ -108,30 +110,190 @@ type cloudBaseUploadResult struct {
 	TempFileURL string `json:"tempFileURL"`
 }
 
-func uploadCourseImageByCloudBase(localFilePath, cloudPath string, cfg storageConfig) (cloudBaseUploadResult, error) {
-	cmd := exec.Command("node", "/app/cloudbase-uploader/upload.mjs", localFilePath, cloudPath, cfg.EnvID)
-	cmd.Env = append(os.Environ(),
-		"COS_SECRET_ID="+cfg.SecretID,
-		"COS_SECRET_KEY="+cfg.SecretKey,
-		"COS_SESSION_TOKEN="+cfg.SessionToken,
-		"TENCENTCLOUD_SECRETID="+cfg.SecretID,
-		"TENCENTCLOUD_SECRETKEY="+cfg.SecretKey,
-		"TENCENTCLOUD_SESSIONTOKEN="+cfg.SessionToken,
-		"CLOUD_ENV_ID="+cfg.EnvID,
-	)
-	output, err := cmd.CombinedOutput()
+type wechatUploadCredentialResp struct {
+	ErrCode       int    `json:"errcode"`
+	ErrMsg        string `json:"errmsg"`
+	URL           string `json:"url"`
+	Token         string `json:"token"`
+	Authorization string `json:"authorization"`
+	FileID        string `json:"file_id"`
+	COSFileID     string `json:"cos_file_id"`
+}
+
+type wechatDownloadFileItem struct {
+	FileID      string `json:"fileid"`
+	DownloadURL string `json:"download_url"`
+	Status      int    `json:"status"`
+	ErrMsg      string `json:"errmsg"`
+}
+
+type wechatDownloadFileResp struct {
+	ErrCode  int                    `json:"errcode"`
+	ErrMsg   string                 `json:"errmsg"`
+	FileList []wechatDownloadFileItem `json:"file_list"`
+}
+
+func postWechatCloudAPI(accessToken, apiPath string, payload interface{}, out interface{}) error {
+	body, err := json.Marshal(payload)
 	if err != nil {
-		return cloudBaseUploadResult{}, fmt.Errorf("cloudbase uploader failed: %s", strings.TrimSpace(string(output)))
+		return fmt.Errorf("序列化微信云接口请求失败: %w", err)
 	}
 
-	var result cloudBaseUploadResult
-	if err := json.Unmarshal(output, &result); err != nil {
-		return cloudBaseUploadResult{}, fmt.Errorf("parse cloudbase uploader result failed: %v, raw: %s", err, strings.TrimSpace(string(output)))
+	apiURL := "https://api.weixin.qq.com" + apiPath + "?access_token=" + url.QueryEscape(strings.TrimSpace(accessToken))
+	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("创建微信云接口请求失败: %w", err)
 	}
-	if strings.TrimSpace(result.FileID) == "" {
-		return cloudBaseUploadResult{}, fmt.Errorf("cloudbase uploader returned empty fileID")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("调用微信云接口失败: %w", err)
 	}
-	return result, nil
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("调用微信云接口失败: HTTP %d %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	if err := json.Unmarshal(respBody, out); err != nil {
+		return fmt.Errorf("解析微信云接口响应失败: %v, raw: %s", err, strings.TrimSpace(string(respBody)))
+	}
+	return nil
+}
+
+func getWechatUploadCredential(accessToken, envID, cloudPath string) (wechatUploadCredentialResp, error) {
+	var resp wechatUploadCredentialResp
+	err := postWechatCloudAPI(accessToken, "/tcb/uploadfile", map[string]string{
+		"env":  strings.TrimSpace(envID),
+		"path": strings.TrimSpace(cloudPath),
+	}, &resp)
+	if err != nil {
+		return resp, err
+	}
+	if resp.ErrCode != 0 {
+		return resp, fmt.Errorf("微信云获取上传凭证失败: errcode=%d errmsg=%s", resp.ErrCode, resp.ErrMsg)
+	}
+	if strings.TrimSpace(resp.URL) == "" || strings.TrimSpace(resp.FileID) == "" || strings.TrimSpace(resp.COSFileID) == "" {
+		return resp, fmt.Errorf("微信云上传凭证不完整: %+v", resp)
+	}
+	return resp, nil
+}
+
+func uploadFileToWechatStorage(uploadURL, cloudPath, filename, contentType string, fileBytes []byte, credential wechatUploadCredentialResp) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	if err := writer.WriteField("key", strings.TrimSpace(cloudPath)); err != nil {
+		return fmt.Errorf("写入上传 key 失败: %w", err)
+	}
+	if err := writer.WriteField("Signature", strings.TrimSpace(credential.Authorization)); err != nil {
+		return fmt.Errorf("写入上传 Signature 失败: %w", err)
+	}
+	if strings.TrimSpace(credential.Token) != "" {
+		if err := writer.WriteField("x-cos-security-token", strings.TrimSpace(credential.Token)); err != nil {
+			return fmt.Errorf("写入上传 token 失败: %w", err)
+		}
+	}
+	if err := writer.WriteField("x-cos-meta-fileid", strings.TrimSpace(credential.COSFileID)); err != nil {
+		return fmt.Errorf("写入上传 fileid 失败: %w", err)
+	}
+
+	contentType = strings.TrimSpace(contentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	if err := writer.WriteField("Content-Type", contentType); err != nil {
+		return fmt.Errorf("写入上传 Content-Type 失败: %w", err)
+	}
+
+	partHeader := textproto.MIMEHeader{}
+	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, filepath.Base(filename)))
+	partHeader.Set("Content-Type", contentType)
+	filePart, err := writer.CreatePart(partHeader)
+	if err != nil {
+		return fmt.Errorf("创建上传文件分片失败: %w", err)
+	}
+	if _, err := filePart.Write(fileBytes); err != nil {
+		return fmt.Errorf("写入上传文件内容失败: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("关闭上传表单失败: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, strings.TrimSpace(uploadURL), &body)
+	if err != nil {
+		return fmt.Errorf("创建对象存储上传请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("上传对象存储失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("上传对象存储失败: HTTP %d %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	return nil
+}
+
+func getWechatDownloadURL(accessToken, envID, fileID string, maxAge int) (string, error) {
+	var resp wechatDownloadFileResp
+	err := postWechatCloudAPI(accessToken, "/tcb/batchdownloadfile", map[string]interface{}{
+		"env": strings.TrimSpace(envID),
+		"file_list": []map[string]interface{}{
+			{
+				"fileid":  strings.TrimSpace(fileID),
+				"max_age": maxAge,
+			},
+		},
+	}, &resp)
+	if err != nil {
+		return "", err
+	}
+	if resp.ErrCode != 0 {
+		return "", fmt.Errorf("微信云获取下载链接失败: errcode=%d errmsg=%s", resp.ErrCode, resp.ErrMsg)
+	}
+	if len(resp.FileList) == 0 {
+		return "", fmt.Errorf("微信云获取下载链接失败: file_list 为空")
+	}
+	item := resp.FileList[0]
+	if item.Status != 0 {
+		return "", fmt.Errorf("微信云获取下载链接失败: status=%d errmsg=%s", item.Status, item.ErrMsg)
+	}
+	if strings.TrimSpace(item.DownloadURL) == "" {
+		return "", fmt.Errorf("微信云获取下载链接失败: download_url 为空")
+	}
+	return strings.TrimSpace(item.DownloadURL), nil
+}
+
+func uploadCourseImageByWechatCloudAPI(fileBytes []byte, fileName, contentType, cloudPath string, cfg storageConfig) (cloudBaseUploadResult, error) {
+	accessToken, err := getWechatAccessToken()
+	if err != nil {
+		return cloudBaseUploadResult{}, err
+	}
+
+	credential, err := getWechatUploadCredential(accessToken, cfg.EnvID, cloudPath)
+	if err != nil {
+		return cloudBaseUploadResult{}, err
+	}
+	if err := uploadFileToWechatStorage(credential.URL, cloudPath, fileName, contentType, fileBytes, credential); err != nil {
+		return cloudBaseUploadResult{}, err
+	}
+
+	downloadURL, err := getWechatDownloadURL(accessToken, cfg.EnvID, credential.FileID, 86400)
+	if err != nil {
+		return cloudBaseUploadResult{}, err
+	}
+	return cloudBaseUploadResult{
+		FileID:      credential.FileID,
+		TempFileURL: downloadURL,
+	}, nil
 }
 
 func firstNonEmpty(keys ...string) string {
@@ -245,22 +407,7 @@ func AdminUploadCourseImage(c *gin.Context) {
 	})
 	// #endregion
 
-	tempFile, err := os.CreateTemp("", "course-upload-*"+ext)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建临时文件失败"})
-		return
-	}
-	tempFilePath := tempFile.Name()
-	if _, err := tempFile.Write(fileBytes); err != nil {
-		_ = tempFile.Close()
-		_ = os.Remove(tempFilePath)
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "写入临时文件失败"})
-		return
-	}
-	_ = tempFile.Close()
-	defer os.Remove(tempFilePath)
-
-	result, err := uploadCourseImageByCloudBase(tempFilePath, cloudPath, cfg)
+	result, err := uploadCourseImageByWechatCloudAPI(fileBytes, fileHeader.Filename, fileHeader.Header.Get("Content-Type"), cloudPath, cfg)
 	if err != nil {
 		// #region debug-point B:put-object-error
 		reportCourseUploadDebug("B", traceID, "put object failed", map[string]interface{}{
