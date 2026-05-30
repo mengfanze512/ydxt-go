@@ -369,7 +369,7 @@ func AdminUploadCourseImage(c *gin.Context) {
 	defer file.Close()
 
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-	cloudPath := fmt.Sprintf("courses_images/%s/%d_%06d%s",
+	cloudPath := fmt.Sprintf("images/%s/%d_%06d%s",
 		time.Now().Format("20060102"),
 		time.Now().UnixNano(),
 		rnd.Intn(1000000),
