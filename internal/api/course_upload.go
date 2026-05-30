@@ -328,6 +328,15 @@ func firstNonEmpty(keys ...string) string {
 	return ""
 }
 
+func firstNonEmptyValue(values ...string) string {
+	for _, value := range values {
+		if val := strings.TrimSpace(value); val != "" {
+			return val
+		}
+	}
+	return ""
+}
+
 // AdminUploadCourseImage 管理端上传课程图片到对象存储
 func AdminUploadCourseImage(c *gin.Context) {
 	traceID := fmt.Sprintf("course-upload-%d", time.Now().UnixNano())
@@ -457,8 +466,8 @@ func AdminUploadCourseImage(c *gin.Context) {
 		"code": 0,
 		"msg":  "success",
 		"data": gin.H{
-			"url":          firstNonEmpty(result.PreviewURL, result.TempFileURL),
-			"preview_url":  firstNonEmpty(result.PreviewURL, result.TempFileURL),
+			"url":          firstNonEmptyValue(result.PreviewURL, result.TempFileURL),
+			"preview_url":  firstNonEmptyValue(result.PreviewURL, result.TempFileURL),
 			"download_url": result.TempFileURL,
 			"key":          cloudPath,
 			"fileID":       result.FileID,
