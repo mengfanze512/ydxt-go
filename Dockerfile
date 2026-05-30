@@ -9,11 +9,15 @@ ENV GO111MODULE=on \
 # 设置工作目录
 WORKDIR /app
 
+RUN apk add --no-cache nodejs npm
+
 # 复制依赖描述文件
 COPY go.mod go.sum ./
+COPY cloudbase-uploader/package.json ./cloudbase-uploader/package.json
 
 # 下载依赖
 RUN go mod download
+RUN cd cloudbase-uploader && npm install --omit=dev
 
 # 复制源代码并进行编译
 COPY . .
@@ -24,7 +28,7 @@ RUN GOOS=linux GOARCH=amd64 go build -o server ./cmd/server/main.go
 FROM alpine:latest
 
 # 安装 tzdata、bash 以及 HTTPS 请求所需的根证书
-RUN apk add --no-cache tzdata bash ca-certificates && update-ca-certificates
+RUN apk add --no-cache tzdata bash ca-certificates nodejs npm && update-ca-certificates
 ENV TZ=Asia/Shanghai
 
 WORKDIR /app
@@ -32,6 +36,7 @@ WORKDIR /app
 # 从 builder 阶段拷贝编译好的二进制文件和配置文件
 COPY --from=builder /app/server .
 COPY --from=builder /app/config/config.yaml ./config/config.yaml
+COPY --from=builder /app/cloudbase-uploader ./cloudbase-uploader
 
 # 暴露 80 端口 (微信云托管默认监听 80)
 EXPOSE 80

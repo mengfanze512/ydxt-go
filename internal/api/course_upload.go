@@ -2,21 +2,20 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/tencentyun/cos-go-sdk-v5"
 )
 
 const maxCourseImageSize = 10 << 20 // 10MB
@@ -27,6 +26,7 @@ type storageConfig struct {
 	SessionToken string
 	Bucket       string
 	Region       string
+	EnvID        string
 	Source       string
 }
 
@@ -66,20 +66,66 @@ func reportCourseUploadDebug(hypothesisID, traceID, msg string, data map[string]
 func loadStorageConfig() (storageConfig, error) {
 	var cfg storageConfig
 
-	// 从环境变量读取，支持多种常用写法
 	cfg.SecretID = firstNonEmpty("COS_SECRET_ID", "TENCENTCLOUD_SECRETID", "SECRETID")
 	cfg.SecretKey = firstNonEmpty("COS_SECRET_KEY", "TENCENTCLOUD_SECRETKEY", "SECRETKEY")
 	cfg.SessionToken = firstNonEmpty("COS_SESSION_TOKEN", "TENCENTCLOUD_SESSIONTOKEN", "SESSIONTOKEN", "TOKEN")
 	cfg.Bucket = firstNonEmpty("COS_BUCKET", "TCB_STORAGE_BUCKET", "BUCKET")
 	cfg.Region = firstNonEmpty("COS_REGION", "TCB_REGION", "REGION")
+	cfg.EnvID = firstNonEmpty("CLOUD_ENV_ID", "TCB_ENV", "TCB_ENVID", "WX_CLOUD_ENV", "ENV_ID")
 
 	cfg.Source = "env"
 
-	if cfg.SecretID == "" || cfg.SecretKey == "" || cfg.Bucket == "" || cfg.Region == "" {
-		return cfg, errors.New("缺少 COS_SECRET_ID/KEY/BUCKET/REGION 配置")
+	if cfg.EnvID == "" && cfg.Bucket != "" {
+		cfg.EnvID = inferEnvIDFromBucket(cfg.Bucket)
+		if cfg.EnvID != "" {
+			cfg.Source = "env+bucket"
+		}
+	}
+
+	if cfg.SecretID == "" || cfg.SecretKey == "" || cfg.EnvID == "" {
+		return cfg, errors.New("缺少 COS_SECRET_ID/KEY 或 CLOUD_ENV_ID/TCB_ENV 配置")
 	}
 
 	return cfg, nil
+}
+
+func inferEnvIDFromBucket(bucket string) string {
+	matched := regexp.MustCompile(`^[^-]+-(.+)-\d+$`).FindStringSubmatch(strings.TrimSpace(bucket))
+	if len(matched) == 2 {
+		return strings.TrimSpace(matched[1])
+	}
+	return ""
+}
+
+type cloudBaseUploadResult struct {
+	FileID      string `json:"fileID"`
+	TempFileURL string `json:"tempFileURL"`
+}
+
+func uploadCourseImageByCloudBase(localFilePath, cloudPath string, cfg storageConfig) (cloudBaseUploadResult, error) {
+	cmd := exec.Command("node", "/app/cloudbase-uploader/upload.mjs", localFilePath, cloudPath, cfg.EnvID)
+	cmd.Env = append(os.Environ(),
+		"COS_SECRET_ID="+cfg.SecretID,
+		"COS_SECRET_KEY="+cfg.SecretKey,
+		"COS_SESSION_TOKEN="+cfg.SessionToken,
+		"TENCENTCLOUD_SECRETID="+cfg.SecretID,
+		"TENCENTCLOUD_SECRETKEY="+cfg.SecretKey,
+		"TENCENTCLOUD_SESSIONTOKEN="+cfg.SessionToken,
+		"CLOUD_ENV_ID="+cfg.EnvID,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return cloudBaseUploadResult{}, fmt.Errorf("cloudbase uploader failed: %s", strings.TrimSpace(string(output)))
+	}
+
+	var result cloudBaseUploadResult
+	if err := json.Unmarshal(output, &result); err != nil {
+		return cloudBaseUploadResult{}, fmt.Errorf("parse cloudbase uploader result failed: %v, raw: %s", err, strings.TrimSpace(string(output)))
+	}
+	if strings.TrimSpace(result.FileID) == "" {
+		return cloudBaseUploadResult{}, fmt.Errorf("cloudbase uploader returned empty fileID")
+	}
+	return result, nil
 }
 
 func firstNonEmpty(keys ...string) string {
@@ -162,49 +208,6 @@ func AdminUploadCourseImage(c *gin.Context) {
 		ext,
 	)
 
-	// 如果你之前遇到了 403，但又想继续用你配置的那套 `COS_SECRET_ID/KEY/BUCKET/REGION` 变量
-	// 最稳妥的方法是使用 COS 的 HTTP API 直接上传（其实 COS-SDK 也是包装了这个）
-	// 但是我们要确保不传错误的 Header
-
-	// 方案1：使用 HTTP 原生构建 POST 表单
-	// 注意：COS 并不推荐用这种原生 HTTP，因为签名特别麻烦。
-	// 所以我们还是得回到 COS-SDK，并严格指定鉴权 Transport。
-
-	// 这里是之前 403 的根因修正：
-	// 如果你只给了 PutObject 权限，但代码尝试去做 MultipartUpload 或者获取其他信息，就会报 403。
-	// 对于小文件，应该强制使用 SimpleUpload。
-
-	// === 以下为最终修正版，完全隔离并强制使用简单上传 ===
-	uploadURL := fmt.Sprintf("https://%s.cos.%s.myqcloud.com", cfg.Bucket, cfg.Region)
-
-	// 如果你希望通过微信云托管原生服务直接穿透（免鉴权 HTTP API）：
-	// 我们可以调用微信的 HTTP API，但是那需要获取 AccessToken。
-
-	// 为了最快解决，我们依然使用原生 HTTP POST 表单配合微信 API，
-	// 或者直接在后端将文件流代理到另一个微信服务端接口。
-
-	// 考虑到你之前已经配好了那4个变量，并且你确定它是个正常的云开发桶：
-	// 这里使用腾讯云云开发 TCB 原生 HTTP API 的一种变通做法（如果我们无法加载正确的 SDK）
-
-	// 鉴于 TCB SDK 的方法不一致，我们回退到使用原生 HTTP 配合 COS 签名。
-
-	// 由于你现在有明确的 403 报错，这证明 COS SDK 是通的，只是鉴权没过。
-	// 为了让你能够绕过这个限制，我建议：
-	// 把云托管里临时 token 的环境变量完全覆盖为空，确保 COS SDK 绝对拿不到错误的 Token！
-	os.Setenv("TENCENTCLOUD_SESSIONTOKEN", "")
-
-	u, _ := url.Parse(uploadURL)
-	b := &cos.BaseURL{BucketURL: u}
-
-	client := cos.NewClient(b, &http.Client{
-		Transport: &cos.AuthorizationTransport{
-			SecretID:     cfg.SecretID,
-			SecretKey:    cfg.SecretKey,
-			SessionToken: cfg.SessionToken,
-		},
-	})
-
-	// 强制读取整个文件内容，避免触发分块上传
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
 		// #region debug-point C:file-read-error
@@ -221,6 +224,7 @@ func AdminUploadCourseImage(c *gin.Context) {
 		"ext":           ext,
 		"bucket":        cfg.Bucket,
 		"region":        cfg.Region,
+		"envId":         cfg.EnvID,
 		"source":        cfg.Source,
 		"hasSecretID":   cfg.SecretID != "",
 		"hasSecretKey":  cfg.SecretKey != "",
@@ -229,14 +233,22 @@ func AdminUploadCourseImage(c *gin.Context) {
 	})
 	// #endregion
 
-	reader := bytes.NewReader(fileBytes)
-	opt := &cos.ObjectPutOptions{
-		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
-			ContentType: fileHeader.Header.Get("Content-Type"),
-		},
+	tempFile, err := os.CreateTemp("", "course-upload-*"+ext)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建临时文件失败"})
+		return
 	}
+	tempFilePath := tempFile.Name()
+	if _, err := tempFile.Write(fileBytes); err != nil {
+		_ = tempFile.Close()
+		_ = os.Remove(tempFilePath)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "写入临时文件失败"})
+		return
+	}
+	_ = tempFile.Close()
+	defer os.Remove(tempFilePath)
 
-	_, err = client.Object.Put(context.Background(), cloudPath, reader, opt)
+	result, err := uploadCourseImageByCloudBase(tempFilePath, cloudPath, cfg)
 	if err != nil {
 		// #region debug-point B:put-object-error
 		reportCourseUploadDebug("B", traceID, "put object failed", map[string]interface{}{
@@ -256,15 +268,16 @@ func AdminUploadCourseImage(c *gin.Context) {
 	}
 
 	// #region debug-point B:put-object-success
-	reportCourseUploadDebug("B", traceID, "put object success", map[string]interface{}{"cloudPath": cloudPath, "url": uploadURL + "/" + cloudPath})
+	reportCourseUploadDebug("B", traceID, "put object success", map[string]interface{}{"cloudPath": cloudPath, "url": result.TempFileURL, "fileID": result.FileID})
 	// #endregion
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"msg":  "success",
 		"data": gin.H{
-			"url":    uploadURL + "/" + cloudPath,
+			"url":    result.TempFileURL,
 			"key":    cloudPath,
+			"fileID": result.FileID,
 			"source": cfg.Source,
 		},
 	})
