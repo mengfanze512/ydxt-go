@@ -54,7 +54,18 @@ try {
   }))
 } catch (error) {
   console.error(JSON.stringify({
-    error: error instanceof Error ? error.message : String(error)
+    error: error instanceof Error ? error.message : String(error),
+    debug: {
+      argvEnvId: envId,
+      cloudEnvId: process.env.CLOUD_ENV_ID || '',
+      tcbEnv: process.env.TCB_ENV || '',
+      tcbEnvId: process.env.TCB_ENVID || '',
+      wxCloudEnv: process.env.WX_CLOUD_ENV || '',
+      envId: process.env.ENV_ID || '',
+      hasSecretId: Boolean(secretId),
+      hasSecretKey: Boolean(secretKey),
+      hasSessionToken: Boolean(sessionToken)
+    }
   }))
   process.exit(1)
 }
