@@ -108,6 +108,7 @@ func inferEnvIDFromBucket(bucket string) string {
 type cloudBaseUploadResult struct {
 	FileID      string `json:"fileID"`
 	TempFileURL string `json:"tempFileURL"`
+	PreviewURL  string `json:"previewURL"`
 }
 
 type wechatUploadCredentialResp struct {
@@ -272,6 +273,27 @@ func getWechatDownloadURL(accessToken, envID, fileID string, maxAge int) (string
 	return strings.TrimSpace(item.DownloadURL), nil
 }
 
+func buildInlinePreviewURL(rawURL, contentType string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+
+	query := parsedURL.Query()
+	query.Set("response-content-disposition", "inline")
+	contentType = strings.TrimSpace(contentType)
+	if strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		query.Set("response-content-type", contentType)
+	}
+	parsedURL.RawQuery = query.Encode()
+	return parsedURL.String()
+}
+
 func uploadCourseImageByWechatCloudAPI(fileBytes []byte, fileName, contentType, cloudPath string, cfg storageConfig) (cloudBaseUploadResult, error) {
 	accessToken, err := getWechatAccessToken()
 	if err != nil {
@@ -293,6 +315,7 @@ func uploadCourseImageByWechatCloudAPI(fileBytes []byte, fileName, contentType, 
 	return cloudBaseUploadResult{
 		FileID:      credential.FileID,
 		TempFileURL: downloadURL,
+		PreviewURL:  buildInlinePreviewURL(downloadURL, contentType),
 	}, nil
 }
 
@@ -434,10 +457,12 @@ func AdminUploadCourseImage(c *gin.Context) {
 		"code": 0,
 		"msg":  "success",
 		"data": gin.H{
-			"url":    result.TempFileURL,
-			"key":    cloudPath,
-			"fileID": result.FileID,
-			"source": cfg.Source,
+			"url":          firstNonEmpty(result.PreviewURL, result.TempFileURL),
+			"preview_url":  firstNonEmpty(result.PreviewURL, result.TempFileURL),
+			"download_url": result.TempFileURL,
+			"key":          cloudPath,
+			"fileID":       result.FileID,
+			"source":       cfg.Source,
 		},
 	})
 }
