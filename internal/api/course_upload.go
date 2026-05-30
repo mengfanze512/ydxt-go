@@ -19,6 +19,7 @@ import (
 )
 
 const maxCourseImageSize = 10 << 20 // 10MB
+const defaultCloudEnvID = "prod-d8gxf4vm265aab5e2"
 
 type storageConfig struct {
 	SecretID     string
@@ -74,6 +75,11 @@ func loadStorageConfig() (storageConfig, error) {
 	cfg.EnvID = firstNonEmpty("CLOUD_ENV_ID", "TCB_ENV", "TCB_ENVID", "WX_CLOUD_ENV", "ENV_ID")
 
 	cfg.Source = "env"
+
+	if cfg.EnvID == "" && defaultCloudEnvID != "" {
+		cfg.EnvID = defaultCloudEnvID
+		cfg.Source = "project-default"
+	}
 
 	if cfg.EnvID == "" && cfg.Bucket != "" {
 		cfg.EnvID = inferEnvIDFromBucket(cfg.Bucket)
