@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,39 @@ type storageConfig struct {
 	Region       string
 	Source       string
 }
+
+// #region debug-point A:report-helper
+func reportCourseUploadDebug(hypothesisID, traceID, msg string, data map[string]interface{}) {
+	debugURL := "http://127.0.0.1:7777/event"
+	sessionID := "course-image-upload-500"
+	if content, err := os.ReadFile(".dbg/course-image-upload-500.env"); err == nil {
+		for _, line := range strings.Split(string(content), "\n") {
+			if strings.HasPrefix(line, "DEBUG_SERVER_URL=") {
+				debugURL = strings.TrimSpace(strings.TrimPrefix(line, "DEBUG_SERVER_URL="))
+			}
+			if strings.HasPrefix(line, "DEBUG_SESSION_ID=") {
+				sessionID = strings.TrimSpace(strings.TrimPrefix(line, "DEBUG_SESSION_ID="))
+			}
+		}
+	}
+	payload := map[string]interface{}{
+		"sessionId":    sessionID,
+		"runId":        "pre-fix",
+		"hypothesisId": hypothesisID,
+		"location":     "internal/api/course_upload.go",
+		"msg":          "[DEBUG] " + msg,
+		"data":         data,
+		"traceId":      traceID,
+		"ts":           time.Now().UnixMilli(),
+	}
+	body, _ := json.Marshal(payload)
+	req, _ := http.NewRequest(http.MethodPost, debugURL, bytes.NewReader(body))
+	if req != nil {
+		req.Header.Set("Content-Type", "application/json")
+		_, _ = http.DefaultClient.Do(req)
+	}
+}
+// #endregion
 
 func loadStorageConfig() (storageConfig, error) {
 	var cfg storageConfig
@@ -59,16 +93,26 @@ func firstNonEmpty(keys ...string) string {
 
 // AdminUploadCourseImage 管理端上传课程图片到对象存储
 func AdminUploadCourseImage(c *gin.Context) {
+	traceID := fmt.Sprintf("course-upload-%d", time.Now().UnixNano())
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
+		// #region debug-point C:form-file-error
+		reportCourseUploadDebug("C", traceID, "form file parse failed", map[string]interface{}{"error": err.Error()})
+		// #endregion
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择要上传的图片"})
 		return
 	}
 	if fileHeader.Size <= 0 {
+		// #region debug-point E:empty-file
+		reportCourseUploadDebug("E", traceID, "file size invalid", map[string]interface{}{"size": fileHeader.Size, "filename": fileHeader.Filename})
+		// #endregion
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "图片不能为空"})
 		return
 	}
 	if fileHeader.Size > maxCourseImageSize {
+		// #region debug-point E:file-too-large
+		reportCourseUploadDebug("E", traceID, "file too large", map[string]interface{}{"size": fileHeader.Size, "filename": fileHeader.Filename})
+		// #endregion
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "图片大小不能超过10MB"})
 		return
 	}
@@ -81,12 +125,18 @@ func AdminUploadCourseImage(c *gin.Context) {
 		".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true,
 	}
 	if !allowed[ext] {
+		// #region debug-point E:file-type-invalid
+		reportCourseUploadDebug("E", traceID, "file extension not allowed", map[string]interface{}{"ext": ext, "filename": fileHeader.Filename, "contentType": fileHeader.Header.Get("Content-Type")})
+		// #endregion
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "仅支持 jpg/jpeg/png/webp/gif 格式"})
 		return
 	}
 
 	cfg, err := loadStorageConfig()
 	if err != nil {
+		// #region debug-point A:storage-config-error
+		reportCourseUploadDebug("A", traceID, "storage config missing", map[string]interface{}{"error": err.Error()})
+		// #endregion
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code": 500,
 			"msg":  fmt.Sprintf("上传配置缺失: %v", err),
@@ -96,6 +146,9 @@ func AdminUploadCourseImage(c *gin.Context) {
 
 	file, err := fileHeader.Open()
 	if err != nil {
+		// #region debug-point C:file-open-error
+		reportCourseUploadDebug("C", traceID, "open uploaded file failed", map[string]interface{}{"error": err.Error(), "filename": fileHeader.Filename})
+		// #endregion
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取上传文件失败"})
 		return
 	}
@@ -154,9 +207,27 @@ func AdminUploadCourseImage(c *gin.Context) {
 	// 强制读取整个文件内容，避免触发分块上传
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
+		// #region debug-point C:file-read-error
+		reportCourseUploadDebug("C", traceID, "read uploaded file failed", map[string]interface{}{"error": err.Error(), "filename": fileHeader.Filename})
+		// #endregion
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件内容失败"})
 		return
 	}
+
+	// #region debug-point A:upload-start
+	reportCourseUploadDebug("A", traceID, "upload started", map[string]interface{}{
+		"filename":      fileHeader.Filename,
+		"size":          fileHeader.Size,
+		"ext":           ext,
+		"bucket":        cfg.Bucket,
+		"region":        cfg.Region,
+		"source":        cfg.Source,
+		"hasSecretID":   cfg.SecretID != "",
+		"hasSecretKey":  cfg.SecretKey != "",
+		"hasSessionTok": strings.TrimSpace(cfg.SessionToken) != "",
+		"cloudPath":     cloudPath,
+	})
+	// #endregion
 
 	reader := bytes.NewReader(fileBytes)
 	opt := &cos.ObjectPutOptions{
@@ -167,12 +238,26 @@ func AdminUploadCourseImage(c *gin.Context) {
 
 	_, err = client.Object.Put(context.Background(), cloudPath, reader, opt)
 	if err != nil {
+		// #region debug-point B:put-object-error
+		reportCourseUploadDebug("B", traceID, "put object failed", map[string]interface{}{
+			"error":         err.Error(),
+			"bucket":        cfg.Bucket,
+			"region":        cfg.Region,
+			"source":        cfg.Source,
+			"hasSessionTok": strings.TrimSpace(cfg.SessionToken) != "",
+			"cloudPath":     cloudPath,
+		})
+		// #endregion
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code": 500,
 			"msg":  fmt.Sprintf("上传失败[%s]: %v", cfg.Source, err),
 		})
 		return
 	}
+
+	// #region debug-point B:put-object-success
+	reportCourseUploadDebug("B", traceID, "put object success", map[string]interface{}{"cloudPath": cloudPath, "url": uploadURL + "/" + cloudPath})
+	// #endregion
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
