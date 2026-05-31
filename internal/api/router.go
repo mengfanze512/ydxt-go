@@ -36,6 +36,7 @@ func InitRouter() *gin.Engine {
 			public.POST("/auth/phone-login", PhoneLogin)
 			// 管理后台登录
 			public.POST("/admin/login", AdminLogin)
+			public.GET("/admin/storage/preview", AdminPreviewCourseImage)
 			// 教学平台公开内容数据
 			public.GET("/courses", GetCourseList)
 			public.GET("/courses/:id", GetCourseDetail)

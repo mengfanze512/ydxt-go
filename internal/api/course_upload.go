@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"ydxt-go/internal/utils"
 )
 
 const maxCourseImageSize = 10 << 20 // 10MB
@@ -108,7 +110,6 @@ func inferEnvIDFromBucket(bucket string) string {
 type cloudBaseUploadResult struct {
 	FileID      string `json:"fileID"`
 	TempFileURL string `json:"tempFileURL"`
-	PreviewURL  string `json:"previewURL"`
 }
 
 type wechatUploadCredentialResp struct {
@@ -273,27 +274,6 @@ func getWechatDownloadURL(accessToken, envID, fileID string, maxAge int) (string
 	return strings.TrimSpace(item.DownloadURL), nil
 }
 
-func buildInlinePreviewURL(rawURL, contentType string) string {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return ""
-	}
-
-	parsedURL, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
-	}
-
-	query := parsedURL.Query()
-	query.Set("response-content-disposition", "inline")
-	contentType = strings.TrimSpace(contentType)
-	if strings.HasPrefix(strings.ToLower(contentType), "image/") {
-		query.Set("response-content-type", contentType)
-	}
-	parsedURL.RawQuery = query.Encode()
-	return parsedURL.String()
-}
-
 func uploadCourseImageByWechatCloudAPI(fileBytes []byte, fileName, contentType, cloudPath string, cfg storageConfig) (cloudBaseUploadResult, error) {
 	accessToken, err := getWechatAccessToken()
 	if err != nil {
@@ -315,7 +295,6 @@ func uploadCourseImageByWechatCloudAPI(fileBytes []byte, fileName, contentType, 
 	return cloudBaseUploadResult{
 		FileID:      credential.FileID,
 		TempFileURL: downloadURL,
-		PreviewURL:  buildInlinePreviewURL(downloadURL, contentType),
 	}, nil
 }
 
@@ -335,6 +314,147 @@ func firstNonEmptyValue(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func extractBearerToken(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parts := strings.SplitN(raw, " ", 2)
+	if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+		return strings.TrimSpace(parts[1])
+	}
+	return raw
+}
+
+func parseAdminPreviewClaims(c *gin.Context) (*utils.CustomClaims, error) {
+	token := extractBearerToken(c.Query("token"))
+	if token == "" {
+		token = extractBearerToken(c.GetHeader("Authorization"))
+	}
+	if token == "" {
+		return nil, errors.New("缺少预览令牌")
+	}
+
+	claims, err := utils.ParseToken(token)
+	if err != nil {
+		return nil, errors.New("无效的预览令牌")
+	}
+	if claims.Role != 2 && claims.Role != 9 {
+		return nil, errors.New("权限不足")
+	}
+	return claims, nil
+}
+
+func isAllowedWechatStorageURL(rawURL string) bool {
+	parsedURL, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(parsedURL.Scheme, "https") {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(parsedURL.Hostname()))
+	return host == "tcb.qcloud.la" || strings.HasSuffix(host, ".tcb.qcloud.la")
+}
+
+func guessImageContentType(sourceURL, upstreamContentType string) string {
+	upstreamContentType = strings.TrimSpace(strings.SplitN(upstreamContentType, ";", 2)[0])
+	if strings.HasPrefix(strings.ToLower(upstreamContentType), "image/") {
+		return upstreamContentType
+	}
+
+	parsedURL, err := url.Parse(strings.TrimSpace(sourceURL))
+	if err == nil {
+		if guessed := mime.TypeByExtension(strings.ToLower(filepath.Ext(parsedURL.Path))); guessed != "" {
+			return guessed
+		}
+	}
+	return "application/octet-stream"
+}
+
+func proxyCourseImageForPreview(c *gin.Context, targetURL string) {
+	req, err := http.NewRequest(http.MethodGet, strings.TrimSpace(targetURL), nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建图片预览请求失败"})
+		return
+	}
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取图片内容失败"})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		c.JSON(http.StatusBadGateway, gin.H{
+			"code": 502,
+			"msg":  fmt.Sprintf("获取图片内容失败: HTTP %d %s", resp.StatusCode, strings.TrimSpace(string(body))),
+		})
+		return
+	}
+
+	contentType := guessImageContentType(targetURL, resp.Header.Get("Content-Type"))
+	filename := "course-image"
+	if parsedURL, err := url.Parse(strings.TrimSpace(targetURL)); err == nil {
+		if base := strings.TrimSpace(filepath.Base(parsedURL.Path)); base != "" && base != "." && base != "/" {
+			filename = strings.ReplaceAll(base, `"`, "")
+		}
+	}
+
+	extraHeaders := map[string]string{
+		"Cache-Control":       "private, max-age=300",
+		"Content-Disposition": fmt.Sprintf(`inline; filename="%s"`, filename),
+	}
+	c.DataFromReader(http.StatusOK, resp.ContentLength, contentType, resp.Body, extraHeaders)
+}
+
+// AdminPreviewCourseImage 管理端内联预览课程图片。
+func AdminPreviewCourseImage(c *gin.Context) {
+	if _, err := parseAdminPreviewClaims(c); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": err.Error()})
+		return
+	}
+
+	fileID := strings.TrimSpace(c.Query("file_id"))
+	rawURL := strings.TrimSpace(c.Query("url"))
+
+	if fileID == "" && rawURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "缺少 file_id 或 url 参数"})
+		return
+	}
+
+	var targetURL string
+	if fileID != "" {
+		cfg, err := loadStorageConfig()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "加载存储配置失败"})
+			return
+		}
+		accessToken, err := getWechatAccessToken()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": fmt.Sprintf("获取 access_token 失败: %v", err)})
+			return
+		}
+		downloadURL, err := getWechatDownloadURL(accessToken, cfg.EnvID, fileID, 600)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": fmt.Sprintf("获取图片下载链接失败: %v", err)})
+			return
+		}
+		targetURL = downloadURL
+	} else {
+		if !isAllowedWechatStorageURL(rawURL) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "仅支持预览微信云托管对象存储图片"})
+			return
+		}
+		targetURL = rawURL
+	}
+
+	proxyCourseImageForPreview(c, targetURL)
 }
 
 // AdminUploadCourseImage 管理端上传课程图片到对象存储
@@ -466,8 +586,7 @@ func AdminUploadCourseImage(c *gin.Context) {
 		"code": 0,
 		"msg":  "success",
 		"data": gin.H{
-			"url":          firstNonEmptyValue(result.PreviewURL, result.TempFileURL),
-			"preview_url":  firstNonEmptyValue(result.PreviewURL, result.TempFileURL),
+			"url":          firstNonEmptyValue(result.TempFileURL),
 			"download_url": result.TempFileURL,
 			"key":          cloudPath,
 			"fileID":       result.FileID,
