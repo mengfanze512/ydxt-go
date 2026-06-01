@@ -169,6 +169,9 @@ func GetSheetMusics(c *gin.Context) {
 		if instrument := strings.TrimSpace(c.Query("instrument")); instrument != "" && instrument != "全部" {
 			query = query.Where("instrument = ?", instrument)
 		}
+		if rawRecommended := strings.TrimSpace(c.Query("recommended")); rawRecommended == "1" && hasSheetMusicColumn("is_recommended") {
+			query = query.Where("is_recommended = ?", 1)
+		}
 		if err := query.Scan(&sheets).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取曲谱失败"})
 			return
