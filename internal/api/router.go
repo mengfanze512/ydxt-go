@@ -85,7 +85,7 @@ func InitRouter() *gin.Engine {
 				shopGroup.GET("/orders", GetMyOrders)
 			}
 
-			auth.GET("/courses/:course_id/progress", GetMyCourseProgress)
+			auth.GET("/course-progress/:course_id", GetMyCourseProgress)
 
 			communityGroup := auth.Group("/community")
 			{
