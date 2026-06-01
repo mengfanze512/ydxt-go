@@ -15,14 +15,16 @@ type chapterRequest struct {
 }
 
 type lessonRequest struct {
-	Title      string `json:"title" binding:"required"`
-	Type       int8   `json:"type"` // 1=视频,2=图文,3=直播
-	MediaURL   string `json:"media_url"`
-	LiveRoomID string `json:"live_room_id"`
-	LiveStart  string `json:"live_start"` // YYYY-MM-DD HH:mm:ss
-	Duration   int    `json:"duration"`
-	IsFree     int8   `json:"is_free"`
-	SortOrder  int    `json:"sort_order"`
+	Title         string `json:"title" binding:"required"`
+	Type          int8   `json:"type"` // 1=视频,2=图文,3=直播
+	MediaURL      string `json:"media_url"`
+	DetailContent string `json:"detail_content"`
+	LiveRoomID    string `json:"live_room_id"`
+	LiveStart     string `json:"live_start"` // YYYY-MM-DD HH:mm:ss
+	ExpireAt      string `json:"expire_at"`  // YYYY-MM-DD HH:mm:ss
+	Duration      int    `json:"duration"`
+	IsFree        int8   `json:"is_free"`
+	SortOrder     int    `json:"sort_order"`
 }
 
 func parseUint(c *gin.Context, keys ...string) (uint64, bool) {
@@ -49,6 +51,28 @@ func parseTime(s string) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+func normalizeLessonRequest(req *lessonRequest) {
+	if req.Type < 1 || req.Type > 3 {
+		req.Type = 1
+	}
+	if req.IsFree != 1 {
+		req.IsFree = 0
+	}
+	switch req.Type {
+	case 1:
+		req.DetailContent = ""
+		req.LiveRoomID = ""
+		req.LiveStart = ""
+	case 2:
+		req.MediaURL = ""
+		req.LiveRoomID = ""
+		req.LiveStart = ""
+	case 3:
+		req.DetailContent = ""
+		req.ExpireAt = ""
+	}
 }
 
 // GetCourseChapters 获取课程章节
@@ -222,19 +246,27 @@ func CreateLesson(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
 		return
 	}
-	if req.Type < 1 || req.Type > 3 {
-		req.Type = 1
-	}
+	normalizeLessonRequest(&req)
 	lesson := model.CourseLesson{
-		ChapterID:  chapterID,
-		Title:      req.Title,
-		Type:       req.Type,
-		MediaURL:   req.MediaURL,
-		LiveRoomID: req.LiveRoomID,
-		LiveStart:  parseTime(req.LiveStart),
-		Duration:   req.Duration,
-		IsFree:     req.IsFree,
-		SortOrder:  req.SortOrder,
+		ChapterID:     chapterID,
+		Title:         req.Title,
+		Type:          req.Type,
+		MediaURL:      req.MediaURL,
+		DetailContent: req.DetailContent,
+		LiveRoomID:    req.LiveRoomID,
+		LiveStart:     parseTime(req.LiveStart),
+		ExpireAt:      parseTime(req.ExpireAt),
+		Duration:      req.Duration,
+		IsFree:        req.IsFree,
+		SortOrder:     req.SortOrder,
+	}
+	if lesson.SortOrder <= 0 {
+		var maxSortOrder int
+		model.DB.Model(&model.CourseLesson{}).
+			Where("chapter_id = ?", chapterID).
+			Select("COALESCE(MAX(sort_order), 0)").
+			Scan(&maxSortOrder)
+		lesson.SortOrder = maxSortOrder + 1
 	}
 	if err := model.DB.Create(&lesson).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增小节失败"})
@@ -271,18 +303,20 @@ func UpdateLesson(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
 		return
 	}
-	if req.Type < 1 || req.Type > 3 {
-		req.Type = 1
-	}
+	normalizeLessonRequest(&req)
 	updates := map[string]interface{}{
-		"title":        req.Title,
-		"type":         req.Type,
-		"media_url":    req.MediaURL,
-		"live_room_id": req.LiveRoomID,
-		"live_start":   parseTime(req.LiveStart),
-		"duration":     req.Duration,
-		"is_free":      req.IsFree,
-		"sort_order":   req.SortOrder,
+		"title":          req.Title,
+		"type":           req.Type,
+		"media_url":      req.MediaURL,
+		"detail_content": req.DetailContent,
+		"live_room_id":   req.LiveRoomID,
+		"live_start":     parseTime(req.LiveStart),
+		"expire_at":      parseTime(req.ExpireAt),
+		"duration":       req.Duration,
+		"is_free":        req.IsFree,
+	}
+	if req.SortOrder > 0 {
+		updates["sort_order"] = req.SortOrder
 	}
 	result := model.DB.Model(&model.CourseLesson{}).Where("id = ?", lessonID).Updates(updates)
 	if result.Error != nil {
