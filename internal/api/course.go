@@ -228,7 +228,7 @@ func GetCourseDetail(c *gin.Context) {
 
 type courseUpsertRequest struct {
 	Title          string  `json:"title" binding:"required"`
-	Cover          string  `json:"cover"`
+	CoverURL       string  `json:"cover_url"`
 	Price          float64 `json:"price"`
 	TeacherID      uint64  `json:"teacher_id"`
 	Category       string  `json:"category"`
@@ -274,11 +274,11 @@ func CreateCourse(c *gin.Context) {
 	insertData := map[string]interface{}{}
 	insertData["title"] = req.Title
 
-	if hasColumn(columnTypes, "cover") {
-		insertData["cover"] = req.Cover
-	}
 	if hasColumn(columnTypes, "cover_url") {
-		insertData["cover_url"] = req.Cover
+		insertData["cover_url"] = req.CoverURL
+	}
+	if hasColumn(columnTypes, "cover") {
+		insertData["cover"] = req.CoverURL
 	}
 	if hasColumn(columnTypes, "teacher_id") {
 		insertData["teacher_id"] = req.TeacherID
@@ -366,11 +366,11 @@ func UpdateCourse(c *gin.Context) {
 	columnTypes := getCourseColumnTypes()
 	updates := map[string]interface{}{}
 	updates["title"] = req.Title
-	if hasColumn(columnTypes, "cover") {
-		updates["cover"] = req.Cover
-	}
 	if hasColumn(columnTypes, "cover_url") {
-		updates["cover_url"] = req.Cover
+		updates["cover_url"] = req.CoverURL
+	}
+	if hasColumn(columnTypes, "cover") {
+		updates["cover"] = req.CoverURL
 	}
 	if hasColumn(columnTypes, "teacher_id") {
 		updates["teacher_id"] = req.TeacherID
@@ -695,4 +695,5 @@ func normalizeCourseCover(course *model.Course) {
 		return
 	}
 	course.Cover = strings.TrimSpace(course.Cover)
+	course.CoverURL = strings.TrimSpace(course.CoverURL)
 }

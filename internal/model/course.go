@@ -6,7 +6,8 @@ import "time"
 type Course struct {
 	ID             uint64    `gorm:"primaryKey;column:id" json:"id"`
 	Title          string    `gorm:"column:title" json:"title"`                     // 课程标题
-	Cover          string    `gorm:"column:cover" json:"cover"`                     // 课程封面图
+	Cover          string    `gorm:"column:cover" json:"-"`                         // 课程封面图(旧字段，不再对外返回)
+	CoverURL       string    `gorm:"column:cover_url" json:"cover_url"`             // 课程封面URL
 	Price          float64   `gorm:"column:price;type:decimal(10,2)" json:"price"`  // 价格
 	TeacherID      uint64    `gorm:"column:teacher_id" json:"teacher_id"`           // 讲师ID
 	TeacherName    string    `gorm:"-" json:"teacher_name"`                         // 讲师名称(关联查询用)
