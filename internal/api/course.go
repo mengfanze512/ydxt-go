@@ -65,6 +65,12 @@ func GetCourseList(c *gin.Context) {
 	if level != "" {
 		query = query.Where("level = ?", level)
 	}
+	if rawFeatured := strings.TrimSpace(c.Query("featured")); rawFeatured == "1" {
+		columnTypes := getCourseColumnTypes()
+		if hasColumn(columnTypes, "is_featured") {
+			query = query.Where("is_featured = ?", 1)
+		}
+	}
 
 	if err := query.Order("created_at desc").Find(&courses).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取课程列表失败"})
@@ -119,11 +125,16 @@ type courseUpsertRequest struct {
 	DetailContent  string  `json:"detail_content"`
 	CarouselImages string  `json:"carousel_images"`
 	StudentCount   int     `json:"student_count"`
+	IsFeatured     int8    `json:"is_featured"`
 	Status         int8    `json:"status"`
 }
 
 type courseStatusRequest struct {
 	Status int8 `json:"status" binding:"oneof=0 1"`
+}
+
+type courseFeaturedRequest struct {
+	IsFeatured int8 `json:"is_featured" binding:"oneof=0 1"`
 }
 
 // CreateCourse 后台新增课程
@@ -197,6 +208,9 @@ func CreateCourse(c *gin.Context) {
 	}
 	if hasColumn(columnTypes, "status") {
 		insertData["status"] = req.Status
+	}
+	if hasColumn(columnTypes, "is_featured") {
+		insertData["is_featured"] = normalizeBinaryFlag(req.IsFeatured)
 	}
 	if err := model.DB.Table("courses").Create(insertData).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增课程失败: " + err.Error()})
@@ -287,6 +301,9 @@ func UpdateCourse(c *gin.Context) {
 	if hasColumn(columnTypes, "status") {
 		updates["status"] = req.Status
 	}
+	if hasColumn(columnTypes, "is_featured") {
+		updates["is_featured"] = normalizeBinaryFlag(req.IsFeatured)
+	}
 
 	result := model.DB.Table("courses").Where("id = ?", id).Updates(updates)
 	if result.Error != nil {
@@ -328,6 +345,47 @@ func UpdateCourseStatus(c *gin.Context) {
 	result := model.DB.Model(&model.Course{}).Where("id = ?", id).Update("status", req.Status)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新课程状态失败"})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "课程不存在"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
+}
+
+// UpdateCourseFeatured 后台修改课程精选状态
+func UpdateCourseFeatured(c *gin.Context) {
+	if model.DB == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "数据库未连接"})
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "课程ID无效"})
+		return
+	}
+
+	var req courseFeaturedRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+		return
+	}
+	if _, ok := ensureCoursePermission(c, id); !ok {
+		return
+	}
+
+	columnTypes := getCourseColumnTypes()
+	if !hasColumn(columnTypes, "is_featured") {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "课程表缺少精选字段"})
+		return
+	}
+
+	result := model.DB.Table("courses").Where("id = ?", id).Update("is_featured", normalizeBinaryFlag(req.IsFeatured))
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新课程精选状态失败"})
 		return
 	}
 	if result.RowsAffected == 0 {
@@ -493,6 +551,13 @@ func convertLevelToType(level string) int {
 	default:
 		return 1
 	}
+}
+
+func normalizeBinaryFlag(v int8) int8 {
+	if v == 1 {
+		return 1
+	}
+	return 0
 }
 
 func normalizeCourseType(course *model.Course) {

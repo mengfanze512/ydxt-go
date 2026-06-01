@@ -16,6 +16,7 @@ type Course struct {
 	DetailContent  string    `gorm:"column:detail_content" json:"detail_content"`   // 课程详情(富文本HTML)
 	CarouselImages string    `gorm:"column:carousel_images" json:"carousel_images"` // 轮播图(JSON数组字符串)
 	StudentCount   int       `gorm:"column:student_count" json:"student_count"`     // 学习人数
+	IsFeatured     int8      `gorm:"column:is_featured" json:"is_featured"`         // 1=精选课程, 0=普通课程
 	Status         int8      `gorm:"column:status" json:"status"`                   // 1=上架, 0=下架
 	CreatedAt      time.Time `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt      time.Time `gorm:"column:updated_at" json:"updated_at"`

@@ -28,6 +28,7 @@ type sheetMusicResponse struct {
 	ContentURL  string   `json:"content_url"`
 	ContentURLs []string `json:"content_urls"`
 	Downloads   int      `json:"downloads"`
+	IsRecommended int8   `json:"is_recommended"`
 }
 
 type legacySheetMusicRecord struct {
@@ -40,6 +41,7 @@ type legacySheetMusicRecord struct {
 	XMLURL     string `gorm:"column:xml_url"`
 	Status     int8   `gorm:"column:status"`
 	IsDeleted  int8   `gorm:"column:is_deleted"`
+	IsRecommended int8 `gorm:"column:is_recommended"`
 }
 
 func loadSheetMusicColumns() {
@@ -71,6 +73,9 @@ func legacySheetMusicSelectFields() string {
 	fields := []string{"id", "title", "instrument", "difficulty", "img_url", "xml_url", "status", "is_deleted"}
 	if hasSheetMusicColumn("price") {
 		fields = append(fields, "price")
+	}
+	if hasSheetMusicColumn("is_recommended") {
+		fields = append(fields, "is_recommended")
 	}
 	return strings.Join(fields, ", ")
 }
@@ -120,6 +125,7 @@ func toSheetMusicResponse(item model.SheetMusic) sheetMusicResponse {
 		ContentURL:  item.ContentURL,
 		ContentURLs: parseSheetContentURLs(item.ContentURL),
 		Downloads:   item.Downloads,
+		IsRecommended: item.IsRecommended,
 	}
 }
 
@@ -142,6 +148,7 @@ func toLegacySheetMusicResponse(item legacySheetMusicRecord) sheetMusicResponse 
 		ContentURL:  contentURL,
 		ContentURLs: parseSheetContentURLs(contentURL),
 		Downloads:   0,
+		IsRecommended: item.IsRecommended,
 	}
 }
 
@@ -178,6 +185,9 @@ func GetSheetMusics(c *gin.Context) {
 	query := model.DB.Order("created_at desc")
 	if instrument := strings.TrimSpace(c.Query("instrument")); instrument != "" && instrument != "全部" {
 		query = query.Where("instrument = ?", instrument)
+	}
+	if rawRecommended := strings.TrimSpace(c.Query("recommended")); rawRecommended == "1" && hasSheetMusicColumn("is_recommended") {
+		query = query.Where("is_recommended = ?", 1)
 	}
 	if err := query.Find(&sheets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取曲谱失败"})

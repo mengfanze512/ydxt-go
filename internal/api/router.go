@@ -127,6 +127,7 @@ func InitRouter() *gin.Engine {
 				adminGroup.POST("/courses", CreateCourse)
 				adminGroup.PUT("/courses/:id", UpdateCourse)
 				adminGroup.PATCH("/courses/:id/status", UpdateCourseStatus)
+				adminGroup.PATCH("/courses/:id/featured", UpdateCourseFeatured)
 				adminGroup.DELETE("/courses/:id", DeleteCourse)
 				adminGroup.POST("/courses/upload-image", AdminUploadCourseImage)
 				adminGroup.GET("/courses/:id/chapters", GetCourseChapters)
@@ -152,6 +153,7 @@ func InitRouter() *gin.Engine {
 				adminGroup.GET("/sheet-musics/:id", AdminGetSheetMusicDetail)
 				adminGroup.POST("/sheet-musics", AdminCreateSheetMusic)
 				adminGroup.PUT("/sheet-musics/:id", AdminUpdateSheetMusic)
+				adminGroup.PATCH("/sheet-musics/:id/recommended", AdminUpdateSheetMusicRecommended)
 				adminGroup.DELETE("/sheet-musics/:id", AdminDeleteSheetMusic)
 
 				adminGroup.GET("/learning/tasks", GetLearningTasks)

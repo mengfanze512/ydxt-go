@@ -19,6 +19,11 @@ type adminSheetMusicRequest struct {
 	CoverURL   string  `json:"cover_url"`
 	ContentURL string  `json:"content_url"`
 	Downloads  int     `json:"downloads"`
+	IsRecommended int8 `json:"is_recommended"`
+}
+
+type sheetMusicRecommendedRequest struct {
+	IsRecommended int8 `json:"is_recommended" binding:"oneof=0 1"`
 }
 
 func normalizeDifficulty(difficulty int8) int8 {
@@ -96,6 +101,11 @@ func AdminGetSheetMusics(c *gin.Context) {
 	if rawFree := strings.TrimSpace(c.Query("is_free")); rawFree != "" {
 		if rawFree == "0" || rawFree == "1" {
 			query = query.Where("is_free = ?", rawFree)
+		}
+	}
+	if rawRecommended := strings.TrimSpace(c.Query("is_recommended")); rawRecommended == "0" || rawRecommended == "1" {
+		if hasSheetMusicColumn("is_recommended") {
+			query = query.Where("is_recommended = ?", rawRecommended)
 		}
 	}
 
@@ -180,6 +190,9 @@ func AdminCreateSheetMusic(c *gin.Context) {
 		if hasSheetMusicColumn("price") {
 			data["price"] = normalizeSheetPrice(req.Price, req.IsFree)
 		}
+		if hasSheetMusicColumn("is_recommended") {
+			data["is_recommended"] = normalizeBinaryFlag(req.IsRecommended)
+		}
 		if err := model.DB.Table("sheet_musics").Create(data).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增曲谱失败"})
 			return
@@ -198,6 +211,7 @@ func AdminCreateSheetMusic(c *gin.Context) {
 		CoverURL:   strings.TrimSpace(req.CoverURL),
 		ContentURL: strings.TrimSpace(req.ContentURL),
 		Downloads:  max(req.Downloads, 0),
+		IsRecommended: normalizeBinaryFlag(req.IsRecommended),
 	}
 
 	if err := model.DB.Create(&sheet).Error; err != nil {
@@ -247,6 +261,9 @@ func AdminUpdateSheetMusic(c *gin.Context) {
 		if hasSheetMusicColumn("price") {
 			updates["price"] = normalizeSheetPrice(req.Price, req.IsFree)
 		}
+		if hasSheetMusicColumn("is_recommended") {
+			updates["is_recommended"] = normalizeBinaryFlag(req.IsRecommended)
+		}
 		result := model.DB.Table("sheet_musics").Where("id = ? AND is_deleted = ?", id, 0).Updates(updates)
 		if result.Error != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新曲谱失败"})
@@ -270,6 +287,7 @@ func AdminUpdateSheetMusic(c *gin.Context) {
 		"cover_url":   strings.TrimSpace(req.CoverURL),
 		"content_url": strings.TrimSpace(req.ContentURL),
 		"downloads":   max(req.Downloads, 0),
+		"is_recommended": normalizeBinaryFlag(req.IsRecommended),
 	}
 
 	result := model.DB.Model(&model.SheetMusic{}).Where("id = ?", id).Updates(updates)
@@ -317,6 +335,57 @@ func AdminDeleteSheetMusic(c *gin.Context) {
 	result := model.DB.Where("id = ?", id).Delete(&model.SheetMusic{})
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除曲谱失败"})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "曲谱不存在"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
+}
+
+// AdminUpdateSheetMusicRecommended 更新曲谱推荐状态
+func AdminUpdateSheetMusicRecommended(c *gin.Context) {
+	if !requireAdminAccount(c) {
+		return
+	}
+
+	id, ok := parseUint(c, "id")
+	if !ok {
+		return
+	}
+
+	var req sheetMusicRecommendedRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+		return
+	}
+
+	if !hasSheetMusicColumn("is_recommended") {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "曲谱表缺少推荐字段"})
+		return
+	}
+
+	if isLegacySheetMusicSchema() {
+		result := model.DB.Table("sheet_musics").Where("id = ? AND is_deleted = ?", id, 0).
+			Update("is_recommended", normalizeBinaryFlag(req.IsRecommended))
+		if result.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新曲谱推荐状态失败"})
+			return
+		}
+		if result.RowsAffected == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "曲谱不存在"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
+		return
+	}
+
+	result := model.DB.Model(&model.SheetMusic{}).Where("id = ?", id).
+		Update("is_recommended", normalizeBinaryFlag(req.IsRecommended))
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新曲谱推荐状态失败"})
 		return
 	}
 	if result.RowsAffected == 0 {

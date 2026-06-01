@@ -14,6 +14,7 @@ type SheetMusic struct {
 	CoverURL   string    `gorm:"column:cover_url;type:varchar(255)" json:"cover_url"`
 	ContentURL string    `gorm:"column:content_url;type:text" json:"content_url"` // 可存 JSON 数组
 	Downloads  int       `gorm:"column:downloads;type:int;default:0" json:"downloads"`
+	IsRecommended int8   `gorm:"column:is_recommended;type:tinyint;default:0" json:"is_recommended"`
 	CreatedAt  time.Time `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt  time.Time `gorm:"column:updated_at" json:"updated_at"`
 }
