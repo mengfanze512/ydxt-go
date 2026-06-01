@@ -121,11 +121,12 @@ func GetMyPurchasedCourses(c *gin.Context) {
 		statuses := []string{"paid", "shipped"}
 		err := model.DB.
 			Table("orders o").
-			Select("DISTINCT c.*").
+			Select("c.*").
 			Joins("JOIN order_items oi ON oi.order_id = o.id").
 			Joins("JOIN courses c ON c.id = oi.goods_id").
 			Where("o.user_id = ? AND o.type = ? AND o.status IN ?", userID, "course", statuses).
-			Order("o.pay_time desc, o.created_at desc").
+			Group("c.id").
+			Order("MAX(o.pay_time) desc, MAX(o.created_at) desc").
 			Scan(&courses).Error
 		if err == nil {
 			fetched = true
@@ -142,7 +143,7 @@ func GetMyPurchasedCourses(c *gin.Context) {
 		if hasColumn(ordersColumns, "course_id") {
 			query := model.DB.
 				Table("orders o").
-				Select("DISTINCT c.*").
+				Select("c.*").
 				Joins("JOIN courses c ON c.id = o.course_id").
 				Where("o.user_id = ?", userID)
 
@@ -174,7 +175,7 @@ func GetMyPurchasedCourses(c *gin.Context) {
 	if !fetched && model.DB.Migrator().HasTable("user_courses") {
 		if err := model.DB.
 			Table("user_courses uc").
-			Select("DISTINCT c.*").
+			Select("c.*").
 			Joins("JOIN courses c ON c.id = uc.course_id").
 			Where("uc.user_id = ?", userID).
 			Order("uc.created_at desc").
