@@ -115,15 +115,77 @@ func GetMyPurchasedCourses(c *gin.Context) {
 	}
 
 	var courses []model.Course
-	statuses := []string{"paid", "shipped"}
-	if err := model.DB.
-		Table("orders o").
-		Select("DISTINCT c.*").
-		Joins("JOIN order_items oi ON oi.order_id = o.id").
-		Joins("JOIN courses c ON c.id = oi.goods_id").
-		Where("o.user_id = ? AND o.type = ? AND o.status IN ?", userID, "course", statuses).
-		Order("o.pay_time desc, o.created_at desc").
-		Scan(&courses).Error; err != nil {
+	var fetched bool
+	var lastErr error
+	if model.DB.Migrator().HasTable("order_items") {
+		statuses := []string{"paid", "shipped"}
+		err := model.DB.
+			Table("orders o").
+			Select("DISTINCT c.*").
+			Joins("JOIN order_items oi ON oi.order_id = o.id").
+			Joins("JOIN courses c ON c.id = oi.goods_id").
+			Where("o.user_id = ? AND o.type = ? AND o.status IN ?", userID, "course", statuses).
+			Order("o.pay_time desc, o.created_at desc").
+			Scan(&courses).Error
+		if err == nil {
+			fetched = true
+		} else if !(strings.Contains(strings.ToLower(err.Error()), "error 1146") || (strings.Contains(err.Error(), "order_items") && strings.Contains(err.Error(), "doesn't exist"))) {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取已购课程失败"})
+			return
+		} else {
+			lastErr = err
+		}
+	}
+
+	if !fetched {
+		ordersColumns := getTableColumnTypes("orders")
+		if hasColumn(ordersColumns, "course_id") {
+			query := model.DB.
+				Table("orders o").
+				Select("DISTINCT c.*").
+				Joins("JOIN courses c ON c.id = o.course_id").
+				Where("o.user_id = ?", userID)
+
+			if hasColumn(ordersColumns, "type") {
+				query = query.Where("o.type = ?", "course")
+			}
+			if hasColumn(ordersColumns, "status") {
+				statusType := ordersColumns["status"]
+				if strings.Contains(statusType, "int") {
+					query = query.Where("o.status IN ?", []int{1})
+				} else {
+					query = query.Where("o.status IN ?", []string{"paid", "shipped"})
+				}
+			}
+			if hasColumn(ordersColumns, "pay_time") {
+				query = query.Order("o.pay_time desc, o.created_at desc")
+			} else {
+				query = query.Order("o.created_at desc")
+			}
+
+			if err := query.Scan(&courses).Error; err == nil {
+				fetched = true
+			} else {
+				lastErr = err
+			}
+		}
+	}
+
+	if !fetched && model.DB.Migrator().HasTable("user_courses") {
+		if err := model.DB.
+			Table("user_courses uc").
+			Select("DISTINCT c.*").
+			Joins("JOIN courses c ON c.id = uc.course_id").
+			Where("uc.user_id = ?", userID).
+			Order("uc.created_at desc").
+			Scan(&courses).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取已购课程失败"})
+			return
+		}
+		fetched = true
+	}
+
+	if !fetched && lastErr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取已购课程失败"})
 		return
 	}
@@ -477,8 +539,15 @@ func DeleteCourse(c *gin.Context) {
 }
 
 func getCourseColumnTypes() map[string]string {
+	return getTableColumnTypes("courses")
+}
+
+func getTableColumnTypes(table string) map[string]string {
 	types := map[string]string{}
-	rows, err := model.DB.Raw("SHOW COLUMNS FROM courses").Rows()
+	if model.DB == nil || strings.TrimSpace(table) == "" {
+		return types
+	}
+	rows, err := model.DB.Raw(fmt.Sprintf("SHOW COLUMNS FROM %s", table)).Rows()
 	if err != nil {
 		return types
 	}
