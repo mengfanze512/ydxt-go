@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	sheetMusicColumnsOnce sync.Once
-	sheetMusicColumns     map[string]bool
+	sheetMusicColumnsMu     sync.RWMutex
+	sheetMusicColumnsLoaded bool
+	sheetMusicColumns       map[string]bool
 )
 
 type sheetMusicResponse struct {
@@ -44,24 +45,39 @@ type legacySheetMusicRecord struct {
 	IsRecommended int8 `gorm:"column:is_recommended"`
 }
 
-func loadSheetMusicColumns() {
-	sheetMusicColumns = map[string]bool{}
+func fetchSheetMusicColumns() map[string]bool {
+	columnsMap := map[string]bool{}
 	if model.DB == nil {
-		return
+		return columnsMap
 	}
 	var columns []struct {
 		Field string `gorm:"column:Field"`
 	}
 	if err := model.DB.Raw("SHOW COLUMNS FROM sheet_musics").Scan(&columns).Error; err != nil {
-		return
+		return columnsMap
 	}
 	for _, column := range columns {
-		sheetMusicColumns[strings.TrimSpace(column.Field)] = true
+		columnsMap[strings.TrimSpace(column.Field)] = true
 	}
+	return columnsMap
 }
 
 func hasSheetMusicColumn(column string) bool {
-	sheetMusicColumnsOnce.Do(loadSheetMusicColumns)
+	sheetMusicColumnsMu.RLock()
+	loaded := sheetMusicColumnsLoaded
+	exists := sheetMusicColumns[column]
+	sheetMusicColumnsMu.RUnlock()
+	if loaded && exists {
+		return true
+	}
+
+	sheetMusicColumnsMu.Lock()
+	defer sheetMusicColumnsMu.Unlock()
+
+	if !sheetMusicColumnsLoaded || !sheetMusicColumns[column] {
+		sheetMusicColumns = fetchSheetMusicColumns()
+		sheetMusicColumnsLoaded = true
+	}
 	return sheetMusicColumns[column]
 }
 

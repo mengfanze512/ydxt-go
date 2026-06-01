@@ -53,6 +53,8 @@ func InitRouter() *gin.Engine {
 		auth := v1.Group("")
 		auth.Use(middleware.JWTAuth())
 		{
+			auth.GET("/courses/purchased", GetMyPurchasedCourses)
+
 			// 用户模块
 			userGroup := auth.Group("/users")
 			{

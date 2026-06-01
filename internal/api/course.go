@@ -23,6 +23,20 @@ func currentTeacherScope(c *gin.Context) (bool, uint64) {
 	return false, 0
 }
 
+func currentCourseUserID(c *gin.Context) (uint64, bool) {
+	userID, ok := c.Get("userID")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "未登录"})
+		return 0, false
+	}
+	id, ok := userID.(uint64)
+	if !ok || id == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "用户信息无效"})
+		return 0, false
+	}
+	return id, true
+}
+
 func fillTeacherNames(courses []model.Course) {
 	for i, course := range courses {
 		var teacher model.Teacher
@@ -87,6 +101,42 @@ func GetCourseList(c *gin.Context) {
 		"msg":  "success",
 		"data": courses,
 	})
+}
+
+func GetMyPurchasedCourses(c *gin.Context) {
+	if model.DB == nil {
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": []model.Course{}})
+		return
+	}
+
+	userID, ok := currentCourseUserID(c)
+	if !ok {
+		return
+	}
+
+	var courses []model.Course
+	statuses := []string{"paid", "shipped"}
+	if err := model.DB.
+		Table("orders o").
+		Select("DISTINCT c.*").
+		Joins("JOIN order_items oi ON oi.order_id = o.id").
+		Joins("JOIN courses c ON c.id = oi.goods_id").
+		Where("o.user_id = ? AND o.type = ? AND o.status IN ?", userID, "course", statuses).
+		Order("o.pay_time desc, o.created_at desc").
+		Scan(&courses).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取已购课程失败"})
+		return
+	}
+
+	if len(courses) == 0 {
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": []model.Course{}})
+		return
+	}
+
+	normalizeCoursePrices(courses)
+	fillTeacherNames(courses)
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": courses})
 }
 
 // GetCourseDetail 获取单个课程详情
