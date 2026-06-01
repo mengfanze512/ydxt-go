@@ -54,6 +54,7 @@ func InitRouter() *gin.Engine {
 		auth.Use(middleware.JWTAuth())
 		{
 			auth.GET("/courses/purchased", GetMyPurchasedCourses)
+			auth.GET("/learning/tasks", GetLearningTasks)
 
 			// 用户模块
 			userGroup := auth.Group("/users")
@@ -83,6 +84,8 @@ func InitRouter() *gin.Engine {
 				shopGroup.POST("/orders", CreateShopOrder)
 				shopGroup.GET("/orders", GetMyOrders)
 			}
+
+			auth.GET("/courses/:course_id/progress", GetMyCourseProgress)
 
 			communityGroup := auth.Group("/community")
 			{
