@@ -78,6 +78,7 @@ func InitDB() {
 			&UserCheckin{}, &PracticeRecord{}, &CommunityPost{}, &CommunityPostLike{}, &CommunityPostFavorite{}, &CommunityPostComment{}, &CommunitySensitiveWord{}, &FinanceSettlement{},
 			&LearningTask{}, &LearningTaskQuestion{}, &LearningTaskSubmission{},
 			&LearningTaskAnswer{}, &UserCourseProgress{}, &UserLessonProgress{},
+			&CourseLessonComment{}, &CourseLessonCommentLike{},
 		)
 		if err != nil {
 			log.Printf("Failed to auto migrate database: %v\n", err)

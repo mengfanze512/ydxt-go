@@ -55,6 +55,10 @@ func InitRouter() *gin.Engine {
 		{
 			auth.GET("/courses/purchased", GetMyPurchasedCourses)
 			auth.GET("/learning/tasks", GetLearningTasks)
+			auth.GET("/lesson-comments", GetLessonComments)
+			auth.POST("/lesson-comments", CreateLessonComment)
+			auth.POST("/lesson-comments/:id/like", LikeLessonComment)
+			auth.DELETE("/lesson-comments/:id/like", UnlikeLessonComment)
 
 			// 用户模块
 			userGroup := auth.Group("/users")
