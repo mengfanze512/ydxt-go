@@ -136,7 +136,7 @@ func GetLessonComments(c *gin.Context) {
 
 	nicknameMap, avatarMap := buildNicknameAvatarMap(extractLessonCommentUserIDs(comments))
 	likedMap := buildLessonCommentLikedMap(userID, extractLessonCommentIDs(comments))
-	topMap := map[uint64]*lessonCommentResponse{}
+	topIndexMap := map[uint64]int{}
 	topList := make([]lessonCommentResponse, 0)
 	replies := make([]model.CourseLessonComment, 0)
 
@@ -144,17 +144,17 @@ func GetLessonComments(c *gin.Context) {
 		if item.ParentID == 0 {
 			resp := toLessonCommentResponse(item, nicknameMap, avatarMap, likedMap)
 			topList = append(topList, resp)
-			topMap[item.ID] = &topList[len(topList)-1]
+			topIndexMap[item.ID] = len(topList) - 1
 			continue
 		}
 		replies = append(replies, item)
 	}
 	for _, item := range replies {
-		parent := topMap[item.ParentID]
-		if parent == nil {
+		parentIndex, ok := topIndexMap[item.ParentID]
+		if !ok || parentIndex < 0 || parentIndex >= len(topList) {
 			continue
 		}
-		parent.Replies = append(parent.Replies, toLessonCommentResponse(item, nicknameMap, avatarMap, likedMap))
+		topList[parentIndex].Replies = append(topList[parentIndex].Replies, toLessonCommentResponse(item, nicknameMap, avatarMap, likedMap))
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": topList})
