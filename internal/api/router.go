@@ -121,6 +121,10 @@ func InitRouter() *gin.Engine {
 			adminGroup.Use(middleware.RoleAuth(2, 9)) // 管理员和讲师都可进入后台，数据范围由业务层再限制
 			{
 				adminGroup.GET("/dashboard/summary", GetDashboardSummary)
+				adminGroup.GET("/operation-dashboard/overview", GetOperationDashboardOverview)
+				adminGroup.GET("/operation-dashboard/trends", GetOperationDashboardTrends)
+				adminGroup.GET("/operation-dashboard/top-courses", GetOperationDashboardTopCourses)
+				adminGroup.GET("/operation-dashboard/top-teachers", GetOperationDashboardTopTeachers)
 
 				adminGroup.GET("/users", AdminGetUsers)
 
