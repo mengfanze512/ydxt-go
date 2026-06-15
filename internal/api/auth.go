@@ -230,6 +230,47 @@ func PhoneLogin(c *gin.Context) {
 		return
 	}
 
+	{
+		var admin model.Admin
+		adminResult := model.DB.Where("mobile = ?", loginID).First(&admin)
+		if adminResult.Error == nil {
+			if admin.Status != 1 {
+				c.JSON(http.StatusOK, gin.H{"code": 403, "msg": "账号已禁用"})
+				return
+			}
+			if req.Password != "" {
+				if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(req.Password)); err != nil {
+					c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "手机号或密码错误"})
+					return
+				}
+			}
+
+			now := time.Now()
+			_ = model.DB.Model(&model.Admin{}).Where("id = ?", admin.ID).Update("last_login_at", now).Error
+
+			token, err := utils.GenerateToken(admin.ID, 9, accountTypeAdmin, admin.RoleCode, 0)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
+				return
+			}
+
+			buildPhoneLoginSuccess(c, token, gin.H{
+				"id":       admin.ID,
+				"phone":    admin.Mobile,
+				"username": admin.Username,
+				"nickname": admin.Name,
+				"avatar":   "",
+				"role":     int8(9),
+				"roleCode": admin.RoleCode,
+			})
+			return
+		}
+		if adminResult.Error != nil && !errors.Is(adminResult.Error, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "查询管理员账号失败"})
+			return
+		}
+	}
+
 	var teacher model.Teacher
 	teacherResult := model.DB.Where("mobile = ? OR username = ?", loginID, loginID).First(&teacher)
 	if teacherResult.Error == nil {
@@ -436,6 +477,47 @@ func WxLogin(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
+	}
+
+	if strings.TrimSpace(wechatPhone) != "" {
+		var admin model.Admin
+		adminResult := model.DB.Where("mobile = ?", strings.TrimSpace(wechatPhone)).First(&admin)
+		if adminResult.Error == nil {
+			if admin.Status != 1 {
+				c.JSON(http.StatusOK, gin.H{"code": 403, "msg": "账号已禁用"})
+				return
+			}
+			now := time.Now()
+			_ = model.DB.Model(&model.Admin{}).Where("id = ?", admin.ID).Update("last_login_at", now).Error
+
+			token, err := utils.GenerateToken(admin.ID, 9, accountTypeAdmin, admin.RoleCode, 0)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Token 生成失败"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"code": 0,
+				"msg":  "登录成功",
+				"data": gin.H{
+					"token": token,
+					"user": gin.H{
+						"id":       admin.ID,
+						"phone":    strings.TrimSpace(wechatPhone),
+						"username": admin.Username,
+						"nickname": admin.Name,
+						"avatar":   "",
+						"role":     int8(9),
+						"roleCode": admin.RoleCode,
+					},
+				},
+			})
+			return
+		}
+		if adminResult.Error != nil && !errors.Is(adminResult.Error, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "查询管理员账号失败: " + adminResult.Error.Error()})
+			return
+		}
 	}
 
 	// 3. 在数据库中查询用户，如果没有则自动注册/绑定手机号账号
