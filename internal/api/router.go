@@ -43,6 +43,7 @@ func InitRouter() *gin.Engine {
 			public.GET("/courses/:id/chapters", GetCourseChapters)
 			public.GET("/chapters/:id/lessons", GetChapterLessons)
 			public.GET("/lessons/:id/play-url", GetLessonPlayURL)
+			public.GET("/learning/tasks", GetLearningTasks)
 			public.GET("/shop/goods", GetShopGoods)
 			public.GET("/shop/goods/:id", GetShopGoodsDetail)
 			public.GET("/sheet-musics", GetSheetMusics)
@@ -55,7 +56,6 @@ func InitRouter() *gin.Engine {
 		auth.Use(middleware.JWTAuth())
 		{
 			auth.GET("/courses/purchased", GetMyPurchasedCourses)
-			auth.GET("/learning/tasks", GetLearningTasks)
 			auth.GET("/lesson-comments", GetLessonComments)
 			auth.POST("/lesson-comments", CreateLessonComment)
 			auth.POST("/lesson-comments/:id/like", LikeLessonComment)
