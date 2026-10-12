@@ -164,9 +164,10 @@ func GetCartItems(c *gin.Context) {
 			if err := model.DB.Where("id = ? AND status = ?", cartItem.GoodsID, 1).First(&course).Error; err != nil {
 				continue
 			}
+			normalizeCoursePrice(&course)
 			item.Title = course.Title
 			item.Price = course.Price
-			item.Image = strings.TrimSpace(course.Cover)
+			item.Image = strings.TrimSpace(course.CoverURL)
 			item.Stock = 1
 			item.Category = "课程"
 			item.Quantity = 1
