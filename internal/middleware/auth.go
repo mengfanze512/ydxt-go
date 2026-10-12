@@ -12,21 +12,27 @@ import (
 // JWTAuth JWT 鉴权中间件
 func JWTAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 优先从 Authorization header 读取，其次从 X-Token 读取
+		// 微信云托管的 HTTP 网关可能会过滤 Authorization 字段，因此支持 X-Token 兜底
+		tokenStr := ""
 		authHeader := c.Request.Header.Get("Authorization")
-		if authHeader == "" {
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenStr = parts[1]
+			}
+		}
+		if tokenStr == "" {
+			tokenStr = c.Request.Header.Get("X-Token")
+		}
+
+		if tokenStr == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "请求头中 auth 为空"})
 			c.Abort()
 			return
 		}
 
-		parts := strings.SplitN(authHeader, " ", 2)
-		if !(len(parts) == 2 && parts[0] == "Bearer") {
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "请求头中 auth 格式有误"})
-			c.Abort()
-			return
-		}
-
-		claims, err := utils.ParseToken(parts[1])
+		claims, err := utils.ParseToken(tokenStr)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "无效的 Token"})
 			c.Abort()
