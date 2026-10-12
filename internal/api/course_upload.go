@@ -600,6 +600,72 @@ func AdminUploadCourseImage(c *gin.Context) {
 
 const maxCourseVideoSize = 500 << 20 // 500MB
 
+// AdminGetVideoUploadCredential 获取视频直传凭证（前端直传对象存储，绕过 HTTP 网关大小限制）
+func AdminGetVideoUploadCredential(c *gin.Context) {
+	ext := strings.ToLower(strings.TrimSpace(c.Query("ext")))
+	if ext == "" {
+		ext = ".mp4"
+	}
+	if !strings.HasPrefix(ext, ".") {
+		ext = "." + ext
+	}
+	allowedVideoExts := map[string]bool{
+		".mp4": true, ".mov": true, ".m4v": true, ".avi": true,
+		".mkv": true, ".webm": true, ".flv": true, ".wmv": true,
+	}
+	if !allowedVideoExts[ext] {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "仅支持 mp4/mov/m4v/avi/mkv/webm/flv/wmv 格式"})
+		return
+	}
+
+	cfg, err := loadStorageConfig()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": fmt.Sprintf("上传配置缺失: %v", err)})
+		return
+	}
+
+	accessToken, err := getWechatAccessToken()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": fmt.Sprintf("获取 access_token 失败: %v", err)})
+		return
+	}
+
+	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	cloudPath := fmt.Sprintf("videos/%s/%d_%06d%s",
+		time.Now().Format("20060102"),
+		time.Now().UnixNano(),
+		rnd.Intn(1000000),
+		ext,
+	)
+
+	credential, err := getWechatUploadCredential(accessToken, cfg.EnvID, cloudPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": fmt.Sprintf("获取上传凭证失败: %v", err)})
+		return
+	}
+
+	// 同时生成一个临时预览 URL，供管理端上传后立即预览
+	previewURL := ""
+	if downloadURL, err := getWechatDownloadURL(accessToken, cfg.EnvID, credential.FileID, 7200); err == nil {
+		previewURL = downloadURL
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"msg":  "success",
+		"data": gin.H{
+			"url":           credential.URL,
+			"authorization": credential.Authorization,
+			"token":         credential.Token,
+			"cos_file_id":   credential.COSFileID,
+			"file_id":       credential.FileID,
+			"cloud_path":    cloudPath,
+			"env_id":        cfg.EnvID,
+			"preview_url":   previewURL,
+		},
+	})
+}
+
 // AdminUploadCourseVideo 管理端上传课程视频到微信云托管对象存储
 func AdminUploadCourseVideo(c *gin.Context) {
 	fileHeader, err := c.FormFile("file")

@@ -145,6 +145,7 @@ func InitRouter() *gin.Engine {
 				adminGroup.DELETE("/courses/:id", DeleteCourse)
 				adminGroup.POST("/courses/upload-image", AdminUploadCourseImage)
 				adminGroup.POST("/courses/upload-video", AdminUploadCourseVideo)
+				adminGroup.GET("/courses/upload-video-credential", AdminGetVideoUploadCredential)
 				adminGroup.GET("/courses/:id/chapters", GetCourseChapters)
 				adminGroup.POST("/courses/:id/chapters", CreateCourseChapter)
 
