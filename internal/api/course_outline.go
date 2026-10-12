@@ -18,6 +18,7 @@ type lessonRequest struct {
 	Title         string `json:"title" binding:"required"`
 	Type          int8   `json:"type"` // 1=视频,2=图文,3=直播
 	MediaURL      string `json:"media_url"`
+	MediaFileID   string `json:"media_file_id"`
 	DetailContent string `json:"detail_content"`
 	LiveRoomID    string `json:"live_room_id"`
 	LiveStart     string `json:"live_start"` // YYYY-MM-DD HH:mm:ss
@@ -67,6 +68,7 @@ func normalizeLessonRequest(req *lessonRequest) {
 		req.LiveStart = ""
 	case 2:
 		req.MediaURL = ""
+		req.MediaFileID = ""
 		req.LiveRoomID = ""
 		req.LiveStart = ""
 	case 3:
@@ -252,6 +254,7 @@ func CreateLesson(c *gin.Context) {
 		Title:         req.Title,
 		Type:          req.Type,
 		MediaURL:      req.MediaURL,
+		MediaFileID:   req.MediaFileID,
 		DetailContent: req.DetailContent,
 		LiveRoomID:    req.LiveRoomID,
 		LiveStart:     parseTime(req.LiveStart),
@@ -308,6 +311,7 @@ func UpdateLesson(c *gin.Context) {
 		"title":          req.Title,
 		"type":           req.Type,
 		"media_url":      req.MediaURL,
+		"media_file_id":  req.MediaFileID,
 		"detail_content": req.DetailContent,
 		"live_room_id":   req.LiveRoomID,
 		"live_start":     parseTime(req.LiveStart),

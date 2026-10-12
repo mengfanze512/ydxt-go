@@ -87,6 +87,11 @@ func InitDB() {
 		log.Println("AutoMigrate skipped. Set ENABLE_AUTO_MIGRATE=true to enable schema migration.")
 	}
 
+	// 幂等列迁移：确保 course_lessons.media_file_id 列存在（用于存储微信云托管对象存储 fileID）
+	if err := ensureLessonMediaFileIDColumn(); err != nil {
+		log.Printf("Warn: ensure course_lessons.media_file_id column failed: %v\n", err)
+	}
+
 	log.Println("Database connection established successfully!")
 }
 
@@ -113,4 +118,21 @@ func InitRedis() {
 	} else {
 		log.Println("Redis connection established successfully!")
 	}
+}
+
+// ensureLessonMediaFileIDColumn 幂等添加 course_lessons.media_file_id 列
+func ensureLessonMediaFileIDColumn() error {
+	if DB == nil {
+		return fmt.Errorf("db not initialized")
+	}
+	var count int64
+	if err := DB.Raw(
+		"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'course_lessons' AND COLUMN_NAME = 'media_file_id'",
+	).Scan(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	return DB.Exec("ALTER TABLE course_lessons ADD COLUMN media_file_id VARCHAR(512) NOT NULL DEFAULT '' COMMENT '微信云托管对象存储 fileID'").Error
 }

@@ -23,6 +23,7 @@ type CourseLesson struct {
 	Title         string     `gorm:"column:title" json:"title"`
 	Type          int8       `gorm:"column:type" json:"type"` // 1=视频, 2=图文, 3=直播
 	MediaURL      string     `gorm:"column:media_url" json:"media_url"`
+	MediaFileID   string     `gorm:"column:media_file_id" json:"media_file_id"`
 	DetailContent string     `gorm:"column:detail_content" json:"detail_content"`
 	LiveRoomID    string     `gorm:"column:live_room_id" json:"live_room_id"`
 	LiveStart     *time.Time `gorm:"column:live_start" json:"live_start"`

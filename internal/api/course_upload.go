@@ -18,8 +18,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"ydxt-go/internal/model"
 	"ydxt-go/internal/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 const maxCourseImageSize = 10 << 20 // 10MB
@@ -66,6 +68,7 @@ func reportCourseUploadDebug(hypothesisID, traceID, msg string, data map[string]
 		_, _ = http.DefaultClient.Do(req)
 	}
 }
+
 // #endregion
 
 func loadStorageConfig() (storageConfig, error) {
@@ -130,8 +133,8 @@ type wechatDownloadFileItem struct {
 }
 
 type wechatDownloadFileResp struct {
-	ErrCode  int                    `json:"errcode"`
-	ErrMsg   string                 `json:"errmsg"`
+	ErrCode  int                      `json:"errcode"`
+	ErrMsg   string                   `json:"errmsg"`
 	FileList []wechatDownloadFileItem `json:"file_list"`
 }
 
@@ -591,6 +594,143 @@ func AdminUploadCourseImage(c *gin.Context) {
 			"key":          cloudPath,
 			"fileID":       result.FileID,
 			"source":       cfg.Source,
+		},
+	})
+}
+
+const maxCourseVideoSize = 500 << 20 // 500MB
+
+// AdminUploadCourseVideo 管理端上传课程视频到微信云托管对象存储
+func AdminUploadCourseVideo(c *gin.Context) {
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择要上传的视频"})
+		return
+	}
+	if fileHeader.Size <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "视频不能为空"})
+		return
+	}
+	if fileHeader.Size > maxCourseVideoSize {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "视频大小不能超过 500MB"})
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
+	if ext == "" {
+		ext = ".mp4"
+	}
+	allowedVideoExts := map[string]bool{
+		".mp4": true, ".mov": true, ".m4v": true, ".avi": true,
+		".mkv": true, ".webm": true, ".flv": true, ".wmv": true,
+	}
+	if !allowedVideoExts[ext] {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "仅支持 mp4/mov/m4v/avi/mkv/webm/flv/wmv 格式"})
+		return
+	}
+
+	cfg, err := loadStorageConfig()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": 500,
+			"msg":  fmt.Sprintf("上传配置缺失: %v", err),
+		})
+		return
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取上传文件失败"})
+		return
+	}
+	defer file.Close()
+
+	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	cloudPath := fmt.Sprintf("videos/%s/%d_%06d%s",
+		time.Now().Format("20060102"),
+		time.Now().UnixNano(),
+		rnd.Intn(1000000),
+		ext,
+	)
+
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件内容失败"})
+		return
+	}
+
+	contentType := fileHeader.Header.Get("Content-Type")
+	if strings.TrimSpace(contentType) == "" {
+		contentType = mime.TypeByExtension(ext)
+	}
+	if strings.TrimSpace(contentType) == "" {
+		contentType = "video/mp4"
+	}
+
+	result, err := uploadCourseImageByWechatCloudAPI(fileBytes, fileHeader.Filename, contentType, cloudPath, cfg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": 500,
+			"msg":  fmt.Sprintf("上传失败[%s]: %v", cfg.Source, err),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"msg":  "success",
+		"data": gin.H{
+			"url":          firstNonEmptyValue(result.TempFileURL),
+			"download_url": result.TempFileURL,
+			"key":          cloudPath,
+			"fileID":       result.FileID,
+			"source":       cfg.Source,
+		},
+	})
+}
+
+// GetLessonPlayURL 学生端获取课时视频的临时播放链接（根据 media_file_id 生成）
+func GetLessonPlayURL(c *gin.Context) {
+	lessonID, ok := parseUint(c, "id", "lesson_id")
+	if !ok {
+		return
+	}
+
+	var lesson model.CourseLesson
+	if err := model.DB.Where("id = ?", lessonID).First(&lesson).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "课时不存在"})
+		return
+	}
+
+	// 如果存储了微信云 fileID，实时生成下载链接
+	if strings.TrimSpace(lesson.MediaFileID) != "" {
+		cfg, err := loadStorageConfig()
+		if err == nil {
+			accessToken, err := getWechatAccessToken()
+			if err == nil {
+				downloadURL, err := getWechatDownloadURL(accessToken, cfg.EnvID, lesson.MediaFileID, 7200)
+				if err == nil {
+					c.JSON(http.StatusOK, gin.H{
+						"code": 0,
+						"msg":  "success",
+						"data": gin.H{
+							"play_url": downloadURL,
+							"file_id":  lesson.MediaFileID,
+						},
+					})
+					return
+				}
+			}
+		}
+	}
+
+	// 兜底：直接返回存储的 media_url
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"msg":  "success",
+		"data": gin.H{
+			"play_url": lesson.MediaURL,
+			"file_id":  lesson.MediaFileID,
 		},
 	})
 }

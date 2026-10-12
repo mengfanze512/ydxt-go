@@ -42,6 +42,7 @@ func InitRouter() *gin.Engine {
 			public.GET("/courses/:id", GetCourseDetail)
 			public.GET("/courses/:id/chapters", GetCourseChapters)
 			public.GET("/chapters/:id/lessons", GetChapterLessons)
+			public.GET("/lessons/:id/play-url", GetLessonPlayURL)
 			public.GET("/shop/goods", GetShopGoods)
 			public.GET("/shop/goods/:id", GetShopGoodsDetail)
 			public.GET("/sheet-musics", GetSheetMusics)
@@ -143,6 +144,7 @@ func InitRouter() *gin.Engine {
 				adminGroup.PATCH("/courses/:id/featured", UpdateCourseFeatured)
 				adminGroup.DELETE("/courses/:id", DeleteCourse)
 				adminGroup.POST("/courses/upload-image", AdminUploadCourseImage)
+				adminGroup.POST("/courses/upload-video", AdminUploadCourseVideo)
 				adminGroup.GET("/courses/:id/chapters", GetCourseChapters)
 				adminGroup.POST("/courses/:id/chapters", CreateCourseChapter)
 
