@@ -92,6 +92,11 @@ func InitDB() {
 		log.Printf("Warn: ensure course_lessons.media_file_id column failed: %v\n", err)
 	}
 
+	// 幂等列迁移：确保 learning_tasks.requirement 列存在（任务要求）
+	if err := ensureLearningTaskRequirementColumn(); err != nil {
+		log.Printf("Warn: ensure learning_tasks.requirement column failed: %v\n", err)
+	}
+
 	log.Println("Database connection established successfully!")
 }
 
@@ -135,4 +140,21 @@ func ensureLessonMediaFileIDColumn() error {
 		return nil
 	}
 	return DB.Exec("ALTER TABLE course_lessons ADD COLUMN media_file_id VARCHAR(512) NOT NULL DEFAULT '' COMMENT '微信云托管对象存储 fileID'").Error
+}
+
+// ensureLearningTaskRequirementColumn 幂等添加 learning_tasks.requirement 列
+func ensureLearningTaskRequirementColumn() error {
+	if DB == nil {
+		return fmt.Errorf("db not initialized")
+	}
+	var count int64
+	if err := DB.Raw(
+		"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'learning_tasks' AND COLUMN_NAME = 'requirement'",
+	).Scan(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	return DB.Exec("ALTER TABLE learning_tasks ADD COLUMN requirement TEXT NULL COMMENT '任务要求'").Error
 }

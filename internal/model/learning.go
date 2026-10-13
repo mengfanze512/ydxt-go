@@ -11,6 +11,7 @@ type LearningTask struct {
 	TaskType    string     `gorm:"column:task_type" json:"task_type"` // homework/quiz
 	Title       string     `gorm:"column:title" json:"title"`
 	Description string     `gorm:"column:description" json:"description"`
+	Requirement string     `gorm:"column:requirement;type:text" json:"requirement"`
 	TotalScore  int        `gorm:"column:total_score" json:"total_score"`
 	PassScore   int        `gorm:"column:pass_score" json:"pass_score"`
 	MaxAttempts int        `gorm:"column:max_attempts" json:"max_attempts"`

@@ -17,6 +17,7 @@ type learningTaskRequest struct {
 	TaskType    string  `json:"task_type" binding:"required,oneof=homework quiz"`
 	Title       string  `json:"title" binding:"required"`
 	Description string  `json:"description"`
+	Requirement string  `json:"requirement"`
 	TotalScore  int     `json:"total_score"`
 	PassScore   int     `json:"pass_score"`
 	MaxAttempts int     `json:"max_attempts"`
@@ -42,13 +43,13 @@ type submitTaskRequest struct {
 }
 
 type lessonProgressRequest struct {
-	CourseID            uint64   `json:"course_id" binding:"required"`
-	ChapterID           *uint64  `json:"chapter_id"`
-	LessonID            uint64   `json:"lesson_id" binding:"required"`
-	ProgressPercent     float64  `json:"progress_percent"`
-	LastPositionSeconds int      `json:"last_position_seconds"`
-	DeltaStudySeconds   int      `json:"delta_study_seconds"`
-	IsCompleted         int8     `json:"is_completed"`
+	CourseID            uint64  `json:"course_id" binding:"required"`
+	ChapterID           *uint64 `json:"chapter_id"`
+	LessonID            uint64  `json:"lesson_id" binding:"required"`
+	ProgressPercent     float64 `json:"progress_percent"`
+	LastPositionSeconds int     `json:"last_position_seconds"`
+	DeltaStudySeconds   int     `json:"delta_study_seconds"`
+	IsCompleted         int8    `json:"is_completed"`
 }
 
 type gradeSubmissionRequest struct {
@@ -155,6 +156,7 @@ func CreateLearningTask(c *gin.Context) {
 		TaskType:    req.TaskType,
 		Title:       req.Title,
 		Description: req.Description,
+		Requirement: req.Requirement,
 		TotalScore:  req.TotalScore,
 		PassScore:   req.PassScore,
 		MaxAttempts: req.MaxAttempts,
@@ -202,6 +204,7 @@ func UpdateLearningTask(c *gin.Context) {
 		"task_type":    req.TaskType,
 		"title":        req.Title,
 		"description":  req.Description,
+		"requirement":  req.Requirement,
 		"total_score":  req.TotalScore,
 		"pass_score":   req.PassScore,
 		"max_attempts": req.MaxAttempts,
