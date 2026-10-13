@@ -44,6 +44,7 @@ func InitRouter() *gin.Engine {
 			public.GET("/chapters/:id/lessons", GetChapterLessons)
 			public.GET("/lessons/:id/play-url", GetLessonPlayURL)
 			public.GET("/learning/tasks", GetLearningTasks)
+			public.GET("/learning/tasks/:id", GetLearningTaskDetail)
 			public.GET("/shop/goods", GetShopGoods)
 			public.GET("/shop/goods/:id", GetShopGoodsDetail)
 			public.GET("/sheet-musics", GetSheetMusics)
@@ -91,6 +92,15 @@ func InitRouter() *gin.Engine {
 			}
 
 			auth.GET("/course-progress/:course_id", GetMyCourseProgress)
+
+			// 作业相关（学员端）
+			homeworkGroup := auth.Group("/homework")
+			{
+				homeworkGroup.GET("/upload-credential", GetHomeworkUploadCredential)
+				homeworkGroup.POST("/submit", SubmitHomework)
+				homeworkGroup.GET("/my-submissions", GetMyHomeworkSubmissions)
+				homeworkGroup.GET("/media-play-url", GetHomeworkMediaPlayURL)
+			}
 
 			communityGroup := auth.Group("/community")
 			{
@@ -183,6 +193,9 @@ func InitRouter() *gin.Engine {
 				adminGroup.PUT("/learning/questions/:id", UpdateTaskQuestion)
 				adminGroup.DELETE("/learning/questions/:id", DeleteTaskQuestion)
 				adminGroup.GET("/learning/tasks/:id/submissions", GetTaskSubmissions)
+
+				adminGroup.GET("/homework/submissions", GetHomeworkSubmissions)
+				adminGroup.POST("/homework/submissions/:id/grade", GradeHomework)
 
 				adminGroup.GET("/finance/settlements", GetSettlements)
 				adminGroup.GET("/community/posts", AdminGetCommunityPosts)

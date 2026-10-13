@@ -104,6 +104,29 @@ func (UserCourseProgress) TableName() string {
 	return "user_course_progress"
 }
 
+// HomeworkSubmission 作业提交记录（媒体+文字）
+type HomeworkSubmission struct {
+	ID          uint64     `gorm:"primaryKey;column:id" json:"id"`
+	TaskID      uint64     `gorm:"column:task_id;index" json:"task_id"`
+	UserID      uint64     `gorm:"column:user_id;index" json:"user_id"`
+	MediaFileID string     `gorm:"column:media_file_id;type:varchar(512);not null;default:''" json:"media_file_id"`
+	MediaType   string     `gorm:"column:media_type;type:varchar(20);not null;default:''" json:"media_type"` // video/audio
+	TextContent string     `gorm:"column:text_content;type:text" json:"text_content"`
+	Status      string     `gorm:"column:status;type:varchar(20);not null;default:submitted" json:"status"` // submitted/graded
+	Score       int        `gorm:"column:score;not null;default:0" json:"score"`
+	IsPassed    int8       `gorm:"column:is_passed;not null;default:0" json:"is_passed"`
+	Feedback    string     `gorm:"column:feedback;type:text" json:"feedback"`
+	SubmittedAt *time.Time `gorm:"column:submitted_at" json:"submitted_at"`
+	GradedAt    *time.Time `gorm:"column:graded_at" json:"graded_at"`
+	GraderID    *uint64    `gorm:"column:grader_id" json:"grader_id"`
+	CreatedAt   time.Time  `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at" json:"updated_at"`
+}
+
+func (HomeworkSubmission) TableName() string {
+	return "homework_submissions"
+}
+
 // UserLessonProgress 学员小节级进度
 type UserLessonProgress struct {
 	ID                  uint64     `gorm:"primaryKey;column:id" json:"id"`
