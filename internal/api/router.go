@@ -89,6 +89,7 @@ func InitRouter() *gin.Engine {
 				shopGroup.DELETE("/cart/:id", DeleteCartItem)
 				shopGroup.POST("/orders", CreateShopOrder)
 				shopGroup.GET("/orders", GetMyOrders)
+				shopGroup.POST("/orders/:id/pay", PayOrder)
 			}
 
 			auth.GET("/course-progress/:course_id", GetMyCourseProgress)

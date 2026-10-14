@@ -124,7 +124,7 @@ func GetMyPurchasedCourses(c *gin.Context) {
 			Select("c.*").
 			Joins("JOIN order_items oi ON oi.order_id = o.id").
 			Joins("JOIN courses c ON c.id = oi.goods_id").
-			Where("o.user_id = ? AND o.type = ? AND o.status IN ?", userID, "course", statuses).
+			Where("o.user_id = ? AND oi.item_type = ? AND o.status IN ?", userID, "course", statuses).
 			Group("c.id").
 			Order("MAX(o.pay_time) desc, MAX(o.created_at) desc").
 			Scan(&courses).Error
@@ -668,6 +668,10 @@ func convertLevelToType(level string) int {
 		return 2
 	case "vip":
 		return 3
+	case "class":
+		return 4
+	case "single":
+		return 5
 	default:
 		return 1
 	}

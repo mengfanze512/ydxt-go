@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 	"ydxt-go/internal/model"
 
@@ -47,12 +48,15 @@ type userOrderListItem struct {
 }
 
 type createShopOrderResponse struct {
-	ID         uint64  `json:"id"`
-	OrderNo    string  `json:"order_no"`
-	Status     string  `json:"status"`
-	Amount     float64 `json:"amount"`
-	PayAmount  float64 `json:"pay_amount"`
-	CreateTime string  `json:"create_time"`
+	ID         uint64   `json:"id"`
+	OrderNo    string   `json:"order_no"`
+	Status     string   `json:"status"`
+	Amount     float64  `json:"amount"`
+	PayAmount  float64  `json:"pay_amount"`
+	CreateTime string   `json:"create_time"`
+	ItemTypes  []string `json:"item_types"`
+	GoodsIDs   []uint64 `json:"goods_ids"`
+	GoodsNames []string `json:"goods_names"`
 }
 
 func generateOrderNo() string {
@@ -73,7 +77,7 @@ func currentOrderUserID(c *gin.Context) (uint64, bool) {
 	return id, true
 }
 
-// CreateShopOrder 从购物车创建商城订单（先打通真实下单，支付后续再接入）
+// CreateShopOrder 从购物车创建订单（支持课程/曲谱/商城实物混合下单）
 func CreateShopOrder(c *gin.Context) {
 	if model.DB == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "数据库未连接"})
@@ -87,7 +91,7 @@ func CreateShopOrder(c *gin.Context) {
 
 	var req createShopOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil || len(req.CartItemIDs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择要下单的购物车商品"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择要下单的商品"})
 		return
 	}
 
@@ -104,56 +108,102 @@ func CreateShopOrder(c *gin.Context) {
 		uniqueIDs = append(uniqueIDs, id)
 	}
 	if len(uniqueIDs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择要下单的购物车商品"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择要下单的商品"})
 		return
 	}
 
+	// 读取购物车（不限制 item_type，支持课程/曲谱/商品）
 	var cartItems []model.CartItem
-	if err := model.DB.Where("user_id = ? AND item_type = ? AND id IN ?", userID, cartItemTypeShop, uniqueIDs).Find(&cartItems).Error; err != nil {
+	if err := model.DB.Where("user_id = ? AND id IN ?", userID, uniqueIDs).Find(&cartItems).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取购物车失败"})
 		return
 	}
 	if len(cartItems) != len(uniqueIDs) {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "部分购物车商品不存在或已失效"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "部分商品不存在或已失效"})
 		return
-	}
-
-	goodsIDs := make([]uint64, 0, len(cartItems))
-	for _, item := range cartItems {
-		goodsIDs = append(goodsIDs, item.GoodsID)
-	}
-
-	var goodsList []model.ShopGoods
-	if err := model.DB.Where("id IN ? AND status = ?", goodsIDs, 1).Find(&goodsList).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取商品信息失败"})
-		return
-	}
-	goodsMap := make(map[uint64]model.ShopGoods, len(goodsList))
-	for _, goods := range goodsList {
-		goodsMap[goods.ID] = goods
 	}
 
 	totalAmount := 0
 	orderItems := make([]model.OrderItem, 0, len(cartItems))
+	respItemTypes := make([]string, 0, len(cartItems))
+	respGoodsIDs := make([]uint64, 0, len(cartItems))
+	respGoodsNames := make([]string, 0, len(cartItems))
+
 	for _, item := range cartItems {
-		goods, exists := goodsMap[item.GoodsID]
-		if !exists {
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "部分商品已下架或不存在"})
-			return
-		}
-		if goods.Stock > 0 && item.Quantity > goods.Stock {
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": goods.Title + " 库存不足"})
-			return
+		itemType := normalizeCartItemType(item.ItemType)
+		var goodsName string
+		var price int
+		var stock int
+
+		switch itemType {
+		case cartItemTypeShop:
+			var goods model.ShopGoods
+			if err := model.DB.Where("id = ? AND status = ?", item.GoodsID, 1).First(&goods).Error; err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "部分商品已下架或不存在"})
+				return
+			}
+			goodsName = goods.Title
+			price = goods.Price
+			stock = goods.Stock
+			if stock > 0 && item.Quantity > stock {
+				c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": goods.Title + " 库存不足"})
+				return
+			}
+		case cartItemTypeCourse:
+			var course model.Course
+			if err := model.DB.Where("id = ? AND status = ?", item.GoodsID, 1).First(&course).Error; err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "部分课程已下架或不存在"})
+				return
+			}
+			normalizeCoursePrice(&course)
+			goodsName = course.Title
+			price = int(course.Price * 100) // 元转分
+			stock = 1
+		case cartItemTypeSheet:
+			if isLegacySheetMusicSchema() {
+				var sheet legacySheetMusicRecord
+				if err := model.DB.Table("sheet_musics").
+					Select(legacySheetMusicSelectFields()).
+					Where("id = ? AND is_deleted = ? AND status = ?", item.GoodsID, 0, 1).
+					First(&sheet).Error; err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "部分曲谱已下架或不存在"})
+					return
+				}
+				sheetData := toLegacySheetMusicResponse(sheet)
+				goodsName = sheetData.Title
+				price = int(sheetData.Price * 100)
+			} else {
+				var sheet model.SheetMusic
+				if err := model.DB.Where("id = ?", item.GoodsID).First(&sheet).Error; err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "部分曲谱已下架或不存在"})
+					return
+				}
+				sheetData := toSheetMusicResponse(sheet)
+				goodsName = sheetData.Title
+				price = int(sheetData.Price * 100)
+			}
+			stock = 1
+		default:
+			continue
 		}
 
-		subtotal := goods.Price * item.Quantity
+		subtotal := price * item.Quantity
 		totalAmount += subtotal
 		orderItems = append(orderItems, model.OrderItem{
-			GoodsID:   goods.ID,
-			GoodsName: goods.Title,
-			Price:     goods.Price,
+			ItemType:  itemType,
+			GoodsID:   item.GoodsID,
+			GoodsName: goodsName,
+			Price:     price,
 			Quantity:  item.Quantity,
 		})
+		respItemTypes = append(respItemTypes, itemType)
+		respGoodsIDs = append(respGoodsIDs, item.GoodsID)
+		respGoodsNames = append(respGoodsNames, goodsName)
+	}
+
+	if len(orderItems) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "没有可下单的商品"})
+		return
 	}
 
 	order := model.Order{
@@ -176,7 +226,8 @@ func CreateShopOrder(c *gin.Context) {
 		if err := tx.Create(&orderItems).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("user_id = ? AND item_type = ? AND id IN ?", userID, cartItemTypeShop, uniqueIDs).Delete(&model.CartItem{}).Error; err != nil {
+		// 删除已下单的购物车项
+		if err := tx.Where("user_id = ? AND id IN ?", userID, uniqueIDs).Delete(&model.CartItem{}).Error; err != nil {
 			return err
 		}
 		return nil
@@ -195,6 +246,85 @@ func CreateShopOrder(c *gin.Context) {
 			Amount:     formatGoodsPrice(order.Amount),
 			PayAmount:  formatGoodsPrice(order.PayAmount),
 			CreateTime: order.CreatedAt.Format("2006-01-02 15:04:05"),
+			ItemTypes:  respItemTypes,
+			GoodsIDs:   respGoodsIDs,
+			GoodsNames: respGoodsNames,
+		},
+	})
+}
+
+// PayOrder 模拟支付（标记订单为已支付，扣减库存）
+func PayOrder(c *gin.Context) {
+	if model.DB == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "数据库未连接"})
+		return
+	}
+
+	userID, ok := currentOrderUserID(c)
+	if !ok {
+		return
+	}
+
+	orderID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "订单ID无效"})
+		return
+	}
+
+	var order model.Order
+	if err := model.DB.Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "订单不存在"})
+		return
+	}
+
+	if order.Status == "paid" || order.Status == "shipped" {
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "订单已支付", "data": order})
+		return
+	}
+
+	if order.Status != "unpaid" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "订单状态不允许支付"})
+		return
+	}
+
+	now := time.Now()
+
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		// 更新订单状态
+		if err := tx.Model(&model.Order{}).Where("id = ?", orderID).Updates(map[string]interface{}{
+			"status":   "paid",
+			"pay_time": now,
+		}).Error; err != nil {
+			return err
+		}
+
+		// 扣减商城商品库存
+		var items []model.OrderItem
+		if err := tx.Where("order_id = ?", orderID).Find(&items).Error; err != nil {
+			return err
+		}
+		for _, item := range items {
+			if item.ItemType == cartItemTypeShop {
+				if err := tx.Model(&model.ShopGoods{}).
+					Where("id = ? AND stock >= ?", item.GoodsID, item.Quantity).
+					UpdateColumn("stock", gorm.Expr("stock - ?", item.Quantity)).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "支付失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"msg":  "success",
+		"data": gin.H{
+			"id":       order.ID,
+			"order_no": order.OrderNo,
+			"status":   "paid",
 		},
 	})
 }

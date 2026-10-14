@@ -12,7 +12,7 @@ type Course struct {
 	TeacherID      uint64    `gorm:"column:teacher_id" json:"teacher_id"`           // 讲师ID
 	TeacherName    string    `gorm:"-" json:"teacher_name"`                         // 讲师名称(关联查询用)
 	Category       string    `gorm:"column:category" json:"category"`               // 分类：如 "入门", "进阶", "考级"
-	Level          string    `gorm:"column:level" json:"level"`                     // 课程类型："system"系统课, "1v1"私教, "vip"会员课
+	Level          string    `gorm:"column:level" json:"level"`                     // 课程类型："system"系统课, "1v1"私教, "vip"会员课, "class"班课, "single"单课
 	Desc           string    `gorm:"column:description" json:"description"`         // 课程描述
 	DetailContent  string    `gorm:"column:detail_content" json:"detail_content"`   // 课程详情(富文本HTML)
 	CarouselImages string    `gorm:"column:carousel_images" json:"carousel_images"` // 轮播图(JSON数组字符串)

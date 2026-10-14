@@ -87,16 +87,6 @@ func InitDB() {
 		log.Println("AutoMigrate skipped. Set ENABLE_AUTO_MIGRATE=true to enable schema migration.")
 	}
 
-	// 幂等列迁移：确保 course_lessons.media_file_id 列存在（用于存储微信云托管对象存储 fileID）
-	if err := ensureLessonMediaFileIDColumn(); err != nil {
-		log.Printf("Warn: ensure course_lessons.media_file_id column failed: %v\n", err)
-	}
-
-	// 幂等列迁移：确保 learning_tasks.requirement 列存在（任务要求）
-	if err := ensureLearningTaskRequirementColumn(); err != nil {
-		log.Printf("Warn: ensure learning_tasks.requirement column failed: %v\n", err)
-	}
-
 	log.Println("Database connection established successfully!")
 }
 
@@ -157,4 +147,21 @@ func ensureLearningTaskRequirementColumn() error {
 		return nil
 	}
 	return DB.Exec("ALTER TABLE learning_tasks ADD COLUMN requirement TEXT NULL COMMENT '任务要求'").Error
+}
+
+// ensureOrderItemTypeColumn 幂等添加 order_items.item_type 列
+func ensureOrderItemTypeColumn() error {
+	if DB == nil {
+		return fmt.Errorf("db not initialized")
+	}
+	var count int64
+	if err := DB.Raw(
+		"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order_items' AND COLUMN_NAME = 'item_type'",
+	).Scan(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	return DB.Exec("ALTER TABLE order_items ADD COLUMN item_type VARCHAR(32) NOT NULL DEFAULT 'shop' COMMENT '商品类型 shop/course/sheet'").Error
 }

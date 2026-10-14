@@ -757,6 +757,10 @@ func AdminUploadCourseVideo(c *gin.Context) {
 
 // GetLessonPlayURL 学生端获取课时视频的临时播放链接（根据 media_file_id 生成）
 func GetLessonPlayURL(c *gin.Context) {
+	if model.DB == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "msg": "数据库未连接，无法获取课时播放地址"})
+		return
+	}
 	lessonID, ok := parseUint(c, "id", "lesson_id")
 	if !ok {
 		return
@@ -768,35 +772,46 @@ func GetLessonPlayURL(c *gin.Context) {
 		return
 	}
 
-	// 如果存储了微信云 fileID，实时生成下载链接
-	if strings.TrimSpace(lesson.MediaFileID) != "" {
-		cfg, err := loadStorageConfig()
-		if err == nil {
-			accessToken, err := getWechatAccessToken()
-			if err == nil {
-				downloadURL, err := getWechatDownloadURL(accessToken, cfg.EnvID, lesson.MediaFileID, 7200)
-				if err == nil {
-					c.JSON(http.StatusOK, gin.H{
-						"code": 0,
-						"msg":  "success",
-						"data": gin.H{
-							"play_url": downloadURL,
-							"file_id":  lesson.MediaFileID,
-						},
-					})
-					return
-				}
-			}
+	// 已配置的转码/CDN 地址优先，HLS 清单及分片由播放器直接访问。
+	mediaURL := strings.TrimSpace(lesson.MediaURL)
+	if mediaURL != "" {
+		parsed, err := url.Parse(mediaURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "课时播放地址必须是有效的 HTTPS 地址，请在后台检查视频配置"})
+			return
 		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": gin.H{
+			"play_url": mediaURL, "file_id": lesson.MediaFileID,
+		}})
+		return
 	}
 
-	// 兜底：直接返回存储的 media_url
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"msg":  "success",
-		"data": gin.H{
-			"play_url": lesson.MediaURL,
-			"file_id":  lesson.MediaFileID,
-		},
-	})
+	// 没有优化地址时，从 File ID 获取临时链接；失败时保留具体原因。
+	if strings.TrimSpace(lesson.MediaFileID) != "" {
+		cfg, err := loadStorageConfig()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "视频存储配置错误: " + err.Error()})
+			return
+		}
+		accessToken, err := getWechatAccessToken()
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"code": 502, "msg": "获取微信视频访问凭证失败: " + err.Error()})
+			return
+		}
+		downloadURL, err := getWechatDownloadURL(accessToken, cfg.EnvID, lesson.MediaFileID, 7200)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"code": 502, "msg": "获取视频临时播放链接失败: " + err.Error()})
+			return
+		}
+		if strings.TrimSpace(downloadURL) == "" {
+			c.JSON(http.StatusBadGateway, gin.H{"code": 502, "msg": "云存储返回了空的视频播放链接"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": gin.H{
+			"play_url": downloadURL, "file_id": lesson.MediaFileID,
+		}})
+		return
+	}
+
+	c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "该课时尚未配置视频 File ID 或优化播放地址"})
 }

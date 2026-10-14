@@ -25,6 +25,7 @@ func (Order) TableName() string {
 type OrderItem struct {
 	ID        uint64    `gorm:"primaryKey" json:"id"`
 	OrderID   uint64    `gorm:"column:order_id;index" json:"order_id"`
+	ItemType  string    `gorm:"column:item_type;type:varchar(32);default:'shop'" json:"item_type"` // shop/course/sheet
 	GoodsID   uint64    `gorm:"column:goods_id;index" json:"goods_id"`
 	GoodsName string    `gorm:"column:goods_name;type:varchar(128)" json:"goods_name"`
 	Price     int       `gorm:"column:price;type:int unsigned" json:"price"`
