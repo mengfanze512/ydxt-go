@@ -771,6 +771,26 @@ func GetLessonPlayURL(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "课时不存在"})
 		return
 	}
+	if err := courseAccess(c, lesson); err != nil {
+		deliveryReply(c, nil, err)
+		return
+	}
+	if lesson.Type == 2 {
+		deliveryReply(c, nil, fmt.Errorf("图文课时没有视频地址"))
+		return
+	}
+	if lesson.Type == 3 {
+		if lesson.LiveStatus == 1 {
+			deliveryReply(c, gin.H{"play_url": lesson.MediaURL, "is_live": true}, nil)
+			return
+		}
+		if lesson.LiveStatus != 2 || !lesson.ReplayEnabled || lesson.ReplayStatus != "ready" || lesson.ReplayFileID == "" {
+			deliveryReply(c, nil, fmt.Errorf("尚未开播或回放尚未就绪"))
+			return
+		}
+		lesson.MediaURL = ""
+		lesson.MediaFileID = lesson.ReplayFileID
+	}
 
 	// 已配置的转码/CDN 地址优先，HLS 清单及分片由播放器直接访问。
 	mediaURL := strings.TrimSpace(lesson.MediaURL)

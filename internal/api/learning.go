@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -618,6 +619,29 @@ func UpsertLessonProgress(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
 		return
 	}
+	var lesson model.CourseLesson
+	if err := model.DB.First(&lesson, req.LessonID).Error; err != nil {
+		deliveryReply(c, nil, err)
+		return
+	}
+	var chapter model.CourseChapter
+	if err := model.DB.First(&chapter, lesson.ChapterID).Error; err != nil {
+		deliveryReply(c, nil, err)
+		return
+	}
+	if chapter.CourseID != req.CourseID {
+		deliveryReply(c, nil, fmt.Errorf("课时不属于该课程"))
+		return
+	}
+	if err := courseAccess(c, lesson); err != nil {
+		deliveryReply(c, nil, err)
+		return
+	}
+	if req.ProgressPercent < 0 || req.ProgressPercent > 100 || req.LastPositionSeconds < 0 || req.DeltaStudySeconds < 0 {
+		deliveryReply(c, nil, fmt.Errorf("学习进度参数错误"))
+		return
+	}
+	req.ChapterID = &chapter.ID
 	now := time.Now()
 
 	var existing model.UserLessonProgress
@@ -626,7 +650,9 @@ func UpsertLessonProgress(c *gin.Context) {
 		existing.ProgressPercent = req.ProgressPercent
 		existing.LastPositionSeconds = req.LastPositionSeconds
 		existing.StudySeconds = existing.StudySeconds + req.DeltaStudySeconds
-		existing.IsCompleted = req.IsCompleted
+		if req.IsCompleted == 1 {
+			existing.IsCompleted = 1
+		}
 		existing.LastStudyAt = &now
 		if req.IsCompleted == 1 {
 			existing.CompletedAt = &now
@@ -722,6 +748,42 @@ func GetMyCourseProgress(c *gin.Context) {
 	}
 	courseID, ok := parseUintParam(c, "course_id")
 	if !ok {
+		return
+	}
+	if raw := c.Query("cohort_id"); raw != "" {
+		cohortID, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || cohortID == 0 {
+			deliveryReply(c, nil, fmt.Errorf("班期ID无效"))
+			return
+		}
+		var cohort model.CourseCohort
+		if err := model.DB.First(&cohort, "id = ? AND course_id = ?", cohortID, courseID).Error; err != nil {
+			deliveryReply(c, nil, err)
+			return
+		}
+		var counts struct {
+			Total     int
+			Completed int
+		}
+		err = model.DB.Table("course_lessons l").
+			Select("COUNT(l.id) AS total, COALESCE(SUM(CASE WHEN p.is_completed = 1 THEN 1 ELSE 0 END),0) AS completed").
+			Joins("LEFT JOIN user_lesson_progress p ON p.lesson_id = l.id AND p.user_id = ?", userID).
+			Where("l.cohort_id = ?", cohortID).Scan(&counts).Error
+		if err != nil {
+			deliveryReply(c, nil, err)
+			return
+		}
+		progress := model.UserCourseProgress{UserID: userID, CourseID: courseID, TotalLessons: counts.Total, CompletedLessons: counts.Completed, Status: "not_started"}
+		if counts.Total > 0 {
+			progress.ProgressPercent = float64(counts.Completed) * 100 / float64(counts.Total)
+		}
+		if counts.Completed > 0 {
+			progress.Status = "in_progress"
+		}
+		if counts.Total > 0 && counts.Completed >= counts.Total {
+			progress.Status = "completed"
+		}
+		deliveryReply(c, progress, nil)
 		return
 	}
 	var progress model.UserCourseProgress

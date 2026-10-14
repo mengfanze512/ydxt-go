@@ -18,6 +18,11 @@ func (CourseChapter) TableName() string {
 
 // CourseLesson 课程小节
 type CourseLesson struct {
+	CohortID      uint64     `json:"cohort_id"`
+	ReplayEnabled bool       `json:"replay_enabled"`
+	ReplayFileID  string     `json:"replay_file_id"`
+	ReplayStatus  string     `json:"replay_status"`
+	LiveStatus    int8       `json:"live_status"`
 	ID            uint64     `gorm:"primaryKey;column:id" json:"id"`
 	ChapterID     uint64     `gorm:"column:chapter_id;index" json:"chapter_id"`
 	Title         string     `gorm:"column:title" json:"title"`

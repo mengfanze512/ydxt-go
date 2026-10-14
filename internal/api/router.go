@@ -41,6 +41,10 @@ func InitRouter() *gin.Engine {
 			public.GET("/courses", GetCourseList)
 			public.GET("/courses/:id", GetCourseDetail)
 			public.GET("/courses/:id/chapters", GetCourseChapters)
+			public.GET("/courses/:id/delivery-settings", GetDeliverySettings)
+			public.GET("/courses/:id/cohorts", GetCourseCohorts)
+			public.GET("/cohorts/:id/lessons", GetCohortLessons)
+			public.GET("/lessons/:id/content", GetDeliveryLesson)
 			public.GET("/chapters/:id/lessons", GetChapterLessons)
 			public.GET("/lessons/:id/play-url", GetLessonPlayURL)
 			public.GET("/learning/tasks", GetLearningTasks)
@@ -93,6 +97,9 @@ func InitRouter() *gin.Engine {
 			}
 
 			auth.GET("/course-progress/:course_id", GetMyCourseProgress)
+			auth.POST("/lesson-progress", UpsertLessonProgress)
+			auth.GET("/lessons/:id/progress", GetDeliveryProgress)
+			auth.POST("/course-orders", CreateCourseOrder)
 
 			// 作业相关（学员端）
 			homeworkGroup := auth.Group("/homework")
@@ -159,6 +166,14 @@ func InitRouter() *gin.Engine {
 				adminGroup.GET("/courses/upload-video-credential", AdminGetVideoUploadCredential)
 				adminGroup.GET("/courses/:id/chapters", GetCourseChapters)
 				adminGroup.POST("/courses/:id/chapters", CreateCourseChapter)
+				adminGroup.GET("/courses/:id/delivery-settings", GetDeliverySettings)
+				adminGroup.PUT("/courses/:id/delivery-settings", SaveDeliverySettings)
+				adminGroup.GET("/courses/:id/cohorts", GetCourseCohorts)
+				adminGroup.POST("/courses/:id/cohorts", SaveCourseCohort)
+				adminGroup.POST("/courses/:id/delivery-chapter", EnsureDeliveryChapter)
+				adminGroup.GET("/cohorts/:id/members", GetCohortMembers)
+				adminGroup.GET("/cohorts/:id/lessons", GetCohortLessons)
+				adminGroup.PATCH("/lessons/:id/live-status", SetDeliveryLiveStatus)
 
 				adminGroup.PUT("/chapters/:id", UpdateCourseChapter)
 				adminGroup.DELETE("/chapters/:id", DeleteCourseChapter)

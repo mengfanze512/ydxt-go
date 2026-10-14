@@ -9,6 +9,7 @@ import (
 	"ydxt-go/internal/model"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func currentTeacherScope(c *gin.Context) (bool, uint64) {
@@ -233,7 +234,7 @@ type courseUpsertRequest struct {
 	TeacherID      uint64  `json:"teacher_id"`
 	Category       string  `json:"category"`
 	Difficulty     int     `json:"difficulty"`
-	Level          string  `json:"level"`
+	Level          string  `json:"level" binding:"omitempty,oneof=system class single 1v1 vip"`
 	Desc           string  `json:"description"`
 	DetailContent  string  `json:"detail_content"`
 	CarouselImages string  `json:"carousel_images"`
@@ -363,6 +364,10 @@ func UpdateCourse(c *gin.Context) {
 		return
 	}
 
+	if err := validateCourseLevelChange(id, req.Level); err != nil {
+		deliveryReply(c, nil, err)
+		return
+	}
 	columnTypes := getCourseColumnTypes()
 	updates := map[string]interface{}{}
 	updates["title"] = req.Title
@@ -526,13 +531,27 @@ func DeleteCourse(c *gin.Context) {
 		return
 	}
 
-	result := model.DB.Table("courses").Where("id = ?", id).Delete(nil)
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除课程失败"})
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "课程不存在"})
+	err = deleteDeliveryContent(id, func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&model.CourseCohort{}).Where("course_id = ?", id).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return fmt.Errorf("课程已配置班期，不能删除；请将课程下架")
+		}
+		if err := tx.Where("chapter_id IN (SELECT id FROM course_chapters WHERE course_id = ?)", id).Delete(&model.CourseLesson{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("course_id = ?", id).Delete(&model.CourseChapter{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("course_id = ?", id).Delete(&model.CourseDeliverySetting{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", id).Delete(&model.Course{}).Error
+	})
+	if err != nil {
+		deliveryReply(c, nil, err)
 		return
 	}
 

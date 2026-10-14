@@ -1,12 +1,18 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 	"ydxt-go/internal/model"
 
+	"errors"
+
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type chapterRequest struct {
@@ -15,6 +21,10 @@ type chapterRequest struct {
 }
 
 type lessonRequest struct {
+	CohortID      uint64 `json:"cohort_id"`
+	ReplayEnabled bool   `json:"replay_enabled"`
+	ReplayFileID  string `json:"replay_file_id"`
+	ReplayStatus  string `json:"replay_status"`
 	Title         string `json:"title" binding:"required"`
 	Type          int8   `json:"type"` // 1=视频,2=图文,3=直播
 	MediaURL      string `json:"media_url"`
@@ -47,7 +57,11 @@ func parseTime(s string) *time.Time {
 	if s == "" {
 		return nil
 	}
-	t, err := time.Parse("2006-01-02 15:04:05", s)
+	location, _ := time.LoadLocation("Asia/Shanghai")
+	if location == nil {
+		location = time.FixedZone("CST", 8*3600)
+	}
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", s, location)
 	if err != nil {
 		return nil
 	}
@@ -73,7 +87,60 @@ func normalizeLessonRequest(req *lessonRequest) {
 		req.LiveStart = ""
 	case 3:
 		req.DetailContent = ""
-		req.ExpireAt = ""
+	}
+	if req.Type != 3 {
+		req.ReplayEnabled = false
+		req.ReplayFileID = ""
+		req.ReplayStatus = "missing"
+	}
+	if req.ReplayStatus == "" {
+		req.ReplayStatus = "missing"
+	}
+}
+
+func validateDeliveryLesson(courseID uint64, req lessonRequest) error {
+	var course model.Course
+	if err := model.DB.First(&course, courseID).Error; err != nil {
+		return err
+	}
+	if req.Type == 3 && (parseTime(req.LiveStart) == nil || req.Duration <= 0 || !strings.HasPrefix(req.MediaURL, "https://")) {
+		return errors.New("直播须设置北京时间、预计时长和 HTTPS 播放地址")
+	}
+	if req.ExpireAt != "" && parseTime(req.ExpireAt) == nil {
+		return errors.New("失效时间格式错误")
+	}
+	if req.ReplayStatus != "missing" && req.ReplayStatus != "processing" && req.ReplayStatus != "ready" {
+		return errors.New("回放状态错误")
+	}
+	if req.ReplayStatus == "ready" && (!req.ReplayEnabled || !strings.HasPrefix(req.ReplayFileID, "cloud://")) {
+		return errors.New("可观看回放须启用并填写 File ID")
+	}
+	if course.Level == "class" {
+		var cohort model.CourseCohort
+		if err := model.DB.First(&cohort, "id = ? AND course_id = ?", req.CohortID, courseID).Error; err != nil {
+			return errors.New("请先选择该课程的班期")
+		}
+		if req.Type == 3 {
+			start := parseTime(req.LiveStart)
+			if start.Before(cohort.StartAt) || start.Add(time.Duration(req.Duration)*time.Second).After(cohort.EndAt) {
+				return errors.New("直播时间须在班期起止范围内")
+			}
+		}
+	} else if req.CohortID != 0 {
+		return errors.New("非班课不能关联班期")
+	}
+	return nil
+}
+
+func redactDeliveryLessons(c *gin.Context, courseID uint64, lessons []model.CourseLesson) {
+	if deliveryStaff(c, courseID) {
+		return
+	}
+	for i := range lessons {
+		lessons[i].MediaURL = ""
+		lessons[i].MediaFileID = ""
+		lessons[i].ReplayFileID = ""
+		lessons[i].DetailContent = ""
 	}
 }
 
@@ -108,7 +175,12 @@ func CreateCourseChapter(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if _, ok := ensureCoursePermission(c, courseID); !ok {
+	course, ok := ensureCoursePermission(c, courseID)
+	if !ok {
+		return
+	}
+	if course.Level == "class" || course.Level == "single" {
+		deliveryReply(c, nil, fmt.Errorf("班课和单课不支持新增章节，请使用对应的授课管理入口"))
 		return
 	}
 	var req chapterRequest
@@ -183,17 +255,14 @@ func DeleteCourseChapter(c *gin.Context) {
 	if _, ok := ensureCoursePermission(c, chapter.CourseID); !ok {
 		return
 	}
-	if err := model.DB.Where("chapter_id = ?", chapterID).Delete(&model.CourseLesson{}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除小节失败"})
-		return
-	}
-	result := model.DB.Where("id = ?", chapterID).Delete(&model.CourseChapter{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除章节失败"})
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "章节不存在"})
+	err := deleteDeliveryContent(chapter.CourseID, func(tx *gorm.DB) error {
+		if err := tx.Where("chapter_id = ?", chapterID).Delete(&model.CourseLesson{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", chapterID).Delete(&model.CourseChapter{}).Error
+	})
+	if err != nil {
+		deliveryReply(c, nil, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
@@ -222,6 +291,7 @@ func GetChapterLessons(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取小节失败"})
 		return
 	}
+	redactDeliveryLessons(c, chapter.CourseID, lessons)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": lessons})
 }
 
@@ -249,7 +319,12 @@ func CreateLesson(c *gin.Context) {
 		return
 	}
 	normalizeLessonRequest(&req)
+	if err := validateDeliveryLesson(chapter.CourseID, req); err != nil {
+		deliveryReply(c, nil, err)
+		return
+	}
 	lesson := model.CourseLesson{
+		CohortID: req.CohortID, ReplayEnabled: req.ReplayEnabled, ReplayFileID: req.ReplayFileID, ReplayStatus: req.ReplayStatus,
 		ChapterID:     chapterID,
 		Title:         req.Title,
 		Type:          req.Type,
@@ -271,8 +346,23 @@ func CreateLesson(c *gin.Context) {
 			Scan(&maxSortOrder)
 		lesson.SortOrder = maxSortOrder + 1
 	}
-	if err := model.DB.Create(&lesson).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "新增小节失败"})
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var course model.Course
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&course, chapter.CourseID).Error; err != nil {
+			return err
+		}
+		if course.Level == "single" {
+			var count int64
+			if err := tx.Table("course_lessons l").Joins("JOIN course_chapters ch ON ch.id = l.chapter_id").Where("ch.course_id = ?", course.ID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return errors.New("单课仅允许一个课时")
+			}
+		}
+		return tx.Create(&lesson).Error
+	}); err != nil {
+		deliveryReply(c, nil, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": lesson})
@@ -307,7 +397,16 @@ func UpdateLesson(c *gin.Context) {
 		return
 	}
 	normalizeLessonRequest(&req)
+	if err := validateDeliveryLesson(chapter.CourseID, req); err != nil {
+		deliveryReply(c, nil, err)
+		return
+	}
+	if lesson.CohortID != req.CohortID {
+		deliveryReply(c, nil, errors.New("已有课时不能转移班期"))
+		return
+	}
 	updates := map[string]interface{}{
+		"cohort_id": req.CohortID, "replay_enabled": req.ReplayEnabled, "replay_file_id": req.ReplayFileID, "replay_status": req.ReplayStatus,
 		"title":          req.Title,
 		"type":           req.Type,
 		"media_url":      req.MediaURL,
@@ -357,13 +456,11 @@ func DeleteLesson(c *gin.Context) {
 	if _, ok := ensureCoursePermission(c, chapter.CourseID); !ok {
 		return
 	}
-	result := model.DB.Where("id = ?", lessonID).Delete(&model.CourseLesson{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除小节失败"})
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "小节不存在"})
+	err := deleteDeliveryContent(chapter.CourseID, func(tx *gorm.DB) error {
+		return tx.Where("id = ?", lessonID).Delete(&model.CourseLesson{}).Error
+	})
+	if err != nil {
+		deliveryReply(c, nil, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})

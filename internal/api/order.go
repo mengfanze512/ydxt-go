@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type adminOrderListItem struct {
@@ -156,6 +157,10 @@ func CreateShopOrder(c *gin.Context) {
 				return
 			}
 			normalizeCoursePrice(&course)
+			if course.Level == "class" {
+				deliveryReply(c, nil, fmt.Errorf("班课请在课程页面选择班期报名"))
+				return
+			}
 			goodsName = course.Title
 			price = int(course.Price * 100) // 元转分
 			stock = 1
@@ -290,6 +295,15 @@ func PayOrder(c *gin.Context) {
 	now := time.Now()
 
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ? AND user_id = ?", orderID, userID).Error; err != nil {
+			return err
+		}
+		if order.Status == "paid" || order.Status == "shipped" {
+			return nil
+		}
+		if order.Status != "unpaid" {
+			return fmt.Errorf("订单状态不允许支付")
+		}
 		// 更新订单状态
 		if err := tx.Model(&model.Order{}).Where("id = ?", orderID).Updates(map[string]interface{}{
 			"status":   "paid",
@@ -303,18 +317,25 @@ func PayOrder(c *gin.Context) {
 		if err := tx.Where("order_id = ?", orderID).Find(&items).Error; err != nil {
 			return err
 		}
+		if err := enrollPaidCourses(tx, order, items); err != nil {
+			return err
+		}
 		for _, item := range items {
 			if item.ItemType == cartItemTypeShop {
-				if err := tx.Model(&model.ShopGoods{}).
+				result := tx.Model(&model.ShopGoods{}).
 					Where("id = ? AND stock >= ?", item.GoodsID, item.Quantity).
-					UpdateColumn("stock", gorm.Expr("stock - ?", item.Quantity)).Error; err != nil {
-					return err
+					UpdateColumn("stock", gorm.Expr("stock - ?", item.Quantity))
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected != 1 {
+					return fmt.Errorf("商品库存不足")
 				}
 			}
 		}
 		return nil
 	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "支付失败"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
 		return
 	}
 
