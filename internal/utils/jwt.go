@@ -15,6 +15,7 @@ type CustomClaims struct {
 	TeacherID         uint64 `json:"teacher_id"`
 	AuthVersion       int    `json:"auth_version"`
 	CredentialVersion string `json:"credential_version"`
+	TestLogin         bool   `json:"test_login,omitempty"`
 	jwt.RegisteredClaims
 }
 

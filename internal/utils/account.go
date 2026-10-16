@@ -86,6 +86,9 @@ func ValidateAccountToken(raw string) (*CustomClaims, *AccountIdentity, error) {
 	if claims.AuthVersion != 1 {
 		return nil, nil, errors.New("登录身份规则已更新，请重新登录")
 	}
+	if claims.TestLogin && !TestLoginEnabled() {
+		return nil, nil, errors.New("测试快捷登录已关闭，请使用微信授权登录")
+	}
 	identity, err := LoadAccount(claims.AccountType, claims.UserID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("账号身份校验失败: %w", err)

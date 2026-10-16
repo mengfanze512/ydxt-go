@@ -32,6 +32,7 @@ func InitRouter() *gin.Engine {
 		{
 			// 微信小程序静默登录换取 Token
 			public.POST("/auth/wx-login", WxLogin)
+			public.POST("/auth/test-login", TestAccountLogin)
 			// H5/App 手机号密码/验证码登录
 			public.POST("/auth/phone-login", PhoneLogin)
 			// 管理后台登录
