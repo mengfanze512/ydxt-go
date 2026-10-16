@@ -229,3 +229,44 @@ func TestWechatTeacherAndDuplicateIdentifiers(t *testing.T) {
 		t.Fatal("ambiguous password identity accepted")
 	}
 }
+
+func TestPasswordLoginFourRolesWithoutTestKey(t *testing.T) {
+	router := authFixture(t)
+	t.Setenv("ENABLE_TEST_LOGIN", "false")
+	t.Setenv("TEST_LOGIN_KEY", "")
+	studentHash := "$2y$10$0oGDxr17JpYawuMJdBLM1OQLyjTymUwYx/1cmH5VdvQISNAHzNEzi"
+	if err := model.DB.Model(&model.User{}).Where("id = ?", 1).Updates(map[string]any{
+		"phone": "18532152083", "password": studentHash,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte("ordinary-admin-secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.DB.Model(&model.Admin{}).Where("id = ?", 99).Updates(map[string]any{
+		"username": "ordinary-admin", "password_hash": string(hash), "status": 1, "role_code": "admin",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range []struct{ Account, Password, Role string }{
+		{"18532152083", "123456", "student"},
+		{"teacher", "teacher-secret", "teacher"},
+		{"ordinary-admin", "ordinary-admin-secret", "admin"},
+		{"manager", "admin-secret", "super_admin"},
+	} {
+		token := loginToken(t, router, account.Account, account.Password)
+		claims, identity, err := utils.ValidateAccountToken(token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if claims.TestLogin || identity.RoleCode != account.Role {
+			t.Fatalf("wrong password login role for %s", account.Account)
+		}
+	}
+	if rec := authRequest(router, "POST", "/api/v1/auth/phone-login", "", gin.H{
+		"account": "18532152083", "password": "wrong-password",
+	}); rec.Code != 401 {
+		t.Fatal("student password authentication was bypassed")
+	}
+}

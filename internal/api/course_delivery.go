@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -379,10 +380,13 @@ func CreateCourseOrder(c *gin.Context) {
 	}
 	order := model.Order{OrderNo: generateOrderNo(), UserID: userID, Type: "shop", Amount: price, PayAmount: price, Status: "unpaid", PayMethod: 1}
 	err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&order).Error; err != nil {
-			return err
+		if err := tx.Omit("PayTime").Create(&order).Error; err != nil {
+			return fmt.Errorf("写入订单主表 orders 失败: %w", err)
 		}
-		return tx.Create(&model.OrderItem{OrderID: order.ID, ItemType: "course", GoodsID: course.ID, CohortID: req.CohortID, GoodsName: course.Title, Price: price, Quantity: 1}).Error
+		if err := tx.Create(&model.OrderItem{OrderID: order.ID, ItemType: "course", GoodsID: course.ID, CohortID: req.CohortID, GoodsName: course.Title, Price: price, Quantity: 1}).Error; err != nil {
+			return fmt.Errorf("写入订单明细 order_items 失败: %w", err)
+		}
+		return nil
 	})
 	deliveryReply(c, gin.H{"id": order.ID, "order_no": order.OrderNo, "amount": float64(price) / 100}, err)
 }

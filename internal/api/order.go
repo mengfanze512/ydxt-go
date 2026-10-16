@@ -116,7 +116,7 @@ func CreateShopOrder(c *gin.Context) {
 	// 读取购物车（不限制 item_type，支持课程/曲谱/商品）
 	var cartItems []model.CartItem
 	if err := model.DB.Where("user_id = ? AND id IN ?", userID, uniqueIDs).Find(&cartItems).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取购物车失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取购物车失败: " + err.Error()})
 		return
 	}
 	if len(cartItems) != len(uniqueIDs) {
@@ -131,6 +131,10 @@ func CreateShopOrder(c *gin.Context) {
 	respGoodsNames := make([]string, 0, len(cartItems))
 
 	for _, item := range cartItems {
+		if item.Quantity < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "购物车商品数量必须大于0，请重新加入商品"})
+			return
+		}
 		itemType := normalizeCartItemType(item.ItemType)
 		var goodsName string
 		var price int
@@ -222,22 +226,23 @@ func CreateShopOrder(c *gin.Context) {
 	}
 
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&order).Error; err != nil {
-			return err
+		// Unpaid orders must use the database default, not Go's zero datetime.
+		if err := tx.Omit("PayTime").Create(&order).Error; err != nil {
+			return fmt.Errorf("写入订单主表 orders 失败: %w", err)
 		}
 		for i := range orderItems {
 			orderItems[i].OrderID = order.ID
 		}
 		if err := tx.Create(&orderItems).Error; err != nil {
-			return err
+			return fmt.Errorf("写入订单明细 order_items 失败: %w", err)
 		}
 		// 删除已下单的购物车项
 		if err := tx.Where("user_id = ? AND id IN ?", userID, uniqueIDs).Delete(&model.CartItem{}).Error; err != nil {
-			return err
+			return fmt.Errorf("清理已下单购物车 cart_items 失败: %w", err)
 		}
 		return nil
 	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建订单失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建订单失败: " + err.Error()})
 		return
 	}
 
