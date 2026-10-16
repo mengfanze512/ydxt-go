@@ -32,9 +32,9 @@ func JWTAuth() gin.HandlerFunc {
 			return
 		}
 
-		claims, err := utils.ParseToken(tokenStr)
+		claims, identity, err := utils.ValidateAccountToken(tokenStr)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "无效的 Token"})
+			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": err.Error()})
 			c.Abort()
 			return
 		}
@@ -45,6 +45,8 @@ func JWTAuth() gin.HandlerFunc {
 		c.Set("accountType", claims.AccountType)
 		c.Set("roleCode", claims.RoleCode)
 		c.Set("teacherID", claims.TeacherID)
+		c.Set("verifiedClaims", claims)
+		c.Set("accountIdentity", identity)
 
 		c.Next()
 	}
@@ -60,7 +62,11 @@ func RoleAuth(allowRoles ...int8) gin.HandlerFunc {
 			return
 		}
 
-		role := currentRole.(int8)
+		role, ok := currentRole.(int8)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 403, "msg": "角色信息无效"})
+			return
+		}
 		isAllow := false
 		for _, allowRole := range allowRoles {
 			if role == allowRole {

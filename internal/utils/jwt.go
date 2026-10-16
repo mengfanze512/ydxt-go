@@ -8,17 +8,20 @@ import (
 )
 
 type CustomClaims struct {
-	UserID      uint64 `json:"user_id"`
-	Role        int8   `json:"role"`
-	AccountType string `json:"account_type"`
-	RoleCode    string `json:"role_code"`
-	TeacherID   uint64 `json:"teacher_id"`
+	UserID            uint64 `json:"user_id"`
+	Role              int8   `json:"role"`
+	AccountType       string `json:"account_type"`
+	RoleCode          string `json:"role_code"`
+	TeacherID         uint64 `json:"teacher_id"`
+	AuthVersion       int    `json:"auth_version"`
+	CredentialVersion string `json:"credential_version"`
 	jwt.RegisteredClaims
 }
 
 // GenerateToken 生成 JWT Token
 func GenerateToken(userID uint64, role int8, accountType, roleCode string, teacherID uint64) (string, error) {
 	claims := CustomClaims{
+		AuthVersion: 1,
 		UserID:      userID,
 		Role:        role,
 		AccountType: accountType,
@@ -30,6 +33,9 @@ func GenerateToken(userID uint64, role int8, accountType, roleCode string, teach
 			Issuer:    "yuedi",
 		},
 	}
+	if identity, err := LoadAccount(accountType, userID); err == nil {
+		claims.CredentialVersion = accountCredentialVersion(identity)
+	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(config.GlobalConfig.JWT.Secret))
@@ -39,7 +45,7 @@ func GenerateToken(userID uint64, role int8, accountType, roleCode string, teach
 func ParseToken(tokenString string) (*CustomClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return []byte(config.GlobalConfig.JWT.Secret), nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithIssuer("yuedi"), jwt.WithExpirationRequired())
 
 	if err != nil {
 		return nil, err

@@ -25,14 +25,18 @@ func deliveryTestDB(t *testing.T) *gorm.DB {
 		t.Fatal(err)
 	}
 	// Test-only schema, never an application startup migration.
-	if err := db.AutoMigrate(&model.Course{}, &model.CourseChapter{}, &model.CourseLesson{},
+	if err := db.AutoMigrate(&model.User{}, &model.Admin{}, &model.Teacher{}, &model.Course{}, &model.CourseChapter{}, &model.CourseLesson{},
 		&model.Order{}, &model.OrderItem{}, &model.CourseCohort{}, &model.CourseEnrollment{},
-		&model.CourseDeliverySetting{}, &model.CourseAttendance{}, &model.UserLessonProgress{}); err != nil {
+		&model.CourseDeliverySetting{}, &model.UserLessonProgress{}); err != nil {
 		t.Fatal(err)
 	}
 	model.DB = db
 	config.GlobalConfig = &config.Config{JWT: config.JWTConfig{Secret: "test-only", ExpireHours: 1}}
 	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close(); model.DB, config.GlobalConfig = oldDB, oldConfig })
+	for id := uint64(1); id <= 6; id++ {
+		mustCreate(t, db, &model.User{ID: id, Role: 1, Status: 1})
+	}
+	mustCreate(t, db, &model.Admin{ID: 99, RoleCode: "admin", Status: 1})
 	return db
 }
 
@@ -122,8 +126,9 @@ func TestDeliveryProgressIsScopedToCohort(t *testing.T) {
 	mustCreate(t, db, &model.Course{ID: 1, Level: "class", Status: 1})
 	mustCreate(t, db, &model.CourseCohort{ID: 1, CourseID: 1, Name: "First"})
 	mustCreate(t, db, &model.CourseChapter{ID: 1, CourseID: 1})
-	mustCreate(t, db, &model.CourseLesson{ID: 1, ChapterID: 1, CohortID: 1})
-	mustCreate(t, db, &model.CourseLesson{ID: 2, ChapterID: 1, CohortID: 2})
+	mustCreate(t, db, &model.CourseLesson{ID: 1, ChapterID: 1, CohortID: 1, Type: 1})
+	mustCreate(t, db, &model.CourseLesson{ID: 2, ChapterID: 1, CohortID: 2, Type: 1})
+	mustCreate(t, db, &model.CourseLesson{ID: 3, ChapterID: 1, CohortID: 1, Type: 3})
 	mustCreate(t, db, &model.UserLessonProgress{UserID: 1, CourseID: 1, LessonID: 1, IsCompleted: 1})
 	c, rec := deliveryTestContext(t, 1, "/progress?cohort_id=1", nil)
 	c.Params = gin.Params{{Key: "course_id", Value: "1"}}
@@ -206,13 +211,13 @@ func TestDeliveryPaidAccessExpiryAndSequence(t *testing.T) {
 	}
 }
 
-func TestDeliveryCohortIsolationReplayAndAttendance(t *testing.T) {
+func TestDeliveryCohortIsolation(t *testing.T) {
 	db := deliveryTestDB(t)
 	mustCreate(t, db, &model.Course{ID: 1, Level: "class", Status: 1})
 	mustCreate(t, db, &model.CourseChapter{ID: 1, CourseID: 1})
 	mustCreate(t, db, &model.Order{ID: 1, OrderNo: "class", UserID: 1, Status: "paid"})
 	mustCreate(t, db, &model.CourseEnrollment{CourseID: 1, CohortID: 1, UserID: 1, OrderID: 1})
-	lesson := model.CourseLesson{ID: 1, ChapterID: 1, CohortID: 2, Type: 3, LiveStatus: 1}
+	lesson := model.CourseLesson{ID: 1, ChapterID: 1, CohortID: 2, Type: 1}
 	mustCreate(t, db, &lesson)
 	c, _ := deliveryTestContext(t, 1, "/content", nil)
 	if err := courseAccess(c, lesson); err == nil {
@@ -225,20 +230,6 @@ func TestDeliveryCohortIsolationReplayAndAttendance(t *testing.T) {
 		GetDeliveryLesson(c)
 		return rec
 	}
-	if rec := get(); rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	get()
-	var count int64
-	db.Model(&model.CourseAttendance{}).Count(&count)
-	if count != 1 {
-		t.Fatalf("attendance duplicated: %d", count)
-	}
-	db.Model(&lesson).Updates(map[string]any{"live_status": 2, "replay_enabled": true, "replay_status": "processing"})
-	if rec := get(); rec.Code != 400 {
-		t.Fatal("processing replay accessible")
-	}
-	db.Model(&lesson).Updates(map[string]any{"replay_status": "ready", "replay_file_id": "cloud://test/replay.mp4"})
 	if rec := get(); rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
@@ -273,7 +264,7 @@ func TestDeliveryValidationAndForgedProgress(t *testing.T) {
 	db := deliveryTestDB(t)
 	mustCreate(t, db, &model.Course{ID: 1, Level: "system", Status: 1})
 	mustCreate(t, db, &model.CourseChapter{ID: 1, CourseID: 1})
-	mustCreate(t, db, &model.CourseLesson{ID: 1, ChapterID: 1, IsFree: 1})
+	mustCreate(t, db, &model.CourseLesson{ID: 1, ChapterID: 1, Type: 1, IsFree: 1})
 	c, rec := deliveryTestContext(t, 1, "/progress", gin.H{"course_id": 2, "lesson_id": 1, "is_completed": 1})
 	UpsertLessonProgress(c)
 	if rec.Code != 400 {
@@ -282,8 +273,91 @@ func TestDeliveryValidationAndForgedProgress(t *testing.T) {
 	if parseTime("2026-10-14 10:00:00").Format("-07:00") != "+08:00" {
 		t.Fatal("schedule not parsed in Beijing time")
 	}
-	req := lessonRequest{Type: 3, LiveStart: "2026-10-14 10:00:00", Duration: 3600, MediaURL: "https://example.com/live.m3u8", ReplayEnabled: true, ReplayStatus: "ready"}
-	if validateDeliveryLesson(1, req) == nil {
-		t.Fatal("ready replay accepted without file ID")
+	for _, kind := range []int8{3, 4, -1} {
+		req := lessonRequest{Type: kind}
+		normalizeLessonRequest(&req)
+		if validateDeliveryLesson(1, req) == nil {
+			t.Fatalf("unsupported lesson type accepted: %d", kind)
+		}
+	}
+}
+
+func TestDisabledLessonCannotBeAccessedAndDoesNotBlockSequence(t *testing.T) {
+	db := deliveryTestDB(t)
+	mustCreate(t, db, &model.Course{ID: 1, Level: "system", Status: 1})
+	mustCreate(t, db, &model.CourseChapter{ID: 1, CourseID: 1})
+	disabled := model.CourseLesson{ID: 1, ChapterID: 1, Type: 3, IsFree: 1, SortOrder: 1, MediaURL: "https://example.com/old-stream.m3u8"}
+	mustCreate(t, db, &disabled)
+	video := model.CourseLesson{ID: 2, ChapterID: 1, Type: 1, SortOrder: 2}
+	mustCreate(t, db, &video)
+	mustCreate(t, db, &model.Order{ID: 1, OrderNo: "sequence", UserID: 1, Status: "paid"})
+	mustCreate(t, db, &model.CourseEnrollment{CourseID: 1, UserID: 1, OrderID: 1})
+	mustCreate(t, db, &model.CourseDeliverySetting{CourseID: 1, Sequential: true})
+	for _, user := range []uint64{0, 1} {
+		c, _ := deliveryTestContext(t, user, "/content", nil)
+		if err := courseAccess(c, disabled); err == nil {
+			t.Fatal("disabled free lesson accessible")
+		}
+	}
+	for _, handler := range []gin.HandlerFunc{GetDeliveryLesson, GetLessonPlayURL} {
+		c, rec := deliveryTestContext(t, 1, "/content", nil)
+		c.Params = gin.Params{{Key: "id", Value: "1"}}
+		handler(c)
+		if rec.Code == 200 {
+			t.Fatal("disabled lesson endpoint accessible")
+		}
+	}
+	c, _ := deliveryTestContext(t, 1, "/content", nil)
+	if err := courseAccess(c, video); err != nil {
+		t.Fatalf("disabled predecessor blocked video: %v", err)
+	}
+	adminToken, err := utils.GenerateToken(99, 9, "admin", "admin", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Request.Header.Set("X-Token", adminToken)
+	if err := courseAccess(c, disabled); err == nil {
+		t.Fatal("administrator bypassed disabled lesson check")
+	}
+	c, rec := deliveryTestContext(t, 0, "/catalog", nil)
+	c.Params = gin.Params{{Key: "id", Value: "1"}}
+	GetChapterLessons(c)
+	var response struct {
+		Data []model.CourseLesson `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 200 || len(response.Data) != 1 || response.Data[0].ID != video.ID {
+		t.Fatalf("catalog includes disabled lesson: %s", rec.Body.String())
+	}
+	c, rec = deliveryTestContext(t, 0, "/lesson", gin.H{
+		"title": "Replacement", "type": 2, "detail_content": "<p>Reading</p>",
+	})
+	c.Params = gin.Params{{Key: "id", Value: "1"}}
+	c.Request.Header.Set("X-Token", adminToken)
+	c.Set("role", 9)
+	UpdateLesson(c)
+	if rec.Code != 200 {
+		t.Fatalf("disabled lesson reconfiguration failed: %s", rec.Body.String())
+	}
+	var replacement model.CourseLesson
+	db.First(&replacement, 1)
+	if replacement.Type != 2 || replacement.MediaURL != "" || replacement.DetailContent == "" {
+		t.Fatal("reconfiguration retained old media or lost new content")
+	}
+}
+
+func TestRemovedEndpointsAreNotRegistered(t *testing.T) {
+	router := InitRouter()
+	for _, route := range router.Routes() {
+		for _, removed := range []string{
+			"/api/v1/rtc/token",
+			"/api/v1/admin/lessons/:id/live-status",
+		} {
+			if route.Path == removed {
+				t.Fatalf("removed route remains registered: %s", route.Path)
+			}
+		}
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 	"ydxt-go/internal/model"
 
@@ -22,17 +21,12 @@ type chapterRequest struct {
 
 type lessonRequest struct {
 	CohortID      uint64 `json:"cohort_id"`
-	ReplayEnabled bool   `json:"replay_enabled"`
-	ReplayFileID  string `json:"replay_file_id"`
-	ReplayStatus  string `json:"replay_status"`
 	Title         string `json:"title" binding:"required"`
-	Type          int8   `json:"type"` // 1=视频,2=图文,3=直播
+	Type          int8   `json:"type"` // 1=视频,2=图文
 	MediaURL      string `json:"media_url"`
 	MediaFileID   string `json:"media_file_id"`
 	DetailContent string `json:"detail_content"`
-	LiveRoomID    string `json:"live_room_id"`
-	LiveStart     string `json:"live_start"` // YYYY-MM-DD HH:mm:ss
-	ExpireAt      string `json:"expire_at"`  // YYYY-MM-DD HH:mm:ss
+	ExpireAt      string `json:"expire_at"` // YYYY-MM-DD HH:mm:ss
 	Duration      int    `json:"duration"`
 	IsFree        int8   `json:"is_free"`
 	SortOrder     int    `json:"sort_order"`
@@ -69,7 +63,7 @@ func parseTime(s string) *time.Time {
 }
 
 func normalizeLessonRequest(req *lessonRequest) {
-	if req.Type < 1 || req.Type > 3 {
+	if req.Type == 0 {
 		req.Type = 1
 	}
 	if req.IsFree != 1 {
@@ -78,53 +72,27 @@ func normalizeLessonRequest(req *lessonRequest) {
 	switch req.Type {
 	case 1:
 		req.DetailContent = ""
-		req.LiveRoomID = ""
-		req.LiveStart = ""
 	case 2:
 		req.MediaURL = ""
 		req.MediaFileID = ""
-		req.LiveRoomID = ""
-		req.LiveStart = ""
-	case 3:
-		req.DetailContent = ""
-	}
-	if req.Type != 3 {
-		req.ReplayEnabled = false
-		req.ReplayFileID = ""
-		req.ReplayStatus = "missing"
-	}
-	if req.ReplayStatus == "" {
-		req.ReplayStatus = "missing"
 	}
 }
 
 func validateDeliveryLesson(courseID uint64, req lessonRequest) error {
+	if req.Type != 1 && req.Type != 2 {
+		return errors.New("课时仅支持视频或图文，请重新配置课时内容")
+	}
 	var course model.Course
 	if err := model.DB.First(&course, courseID).Error; err != nil {
 		return err
 	}
-	if req.Type == 3 && (parseTime(req.LiveStart) == nil || req.Duration <= 0 || !strings.HasPrefix(req.MediaURL, "https://")) {
-		return errors.New("直播须设置北京时间、预计时长和 HTTPS 播放地址")
-	}
 	if req.ExpireAt != "" && parseTime(req.ExpireAt) == nil {
 		return errors.New("失效时间格式错误")
-	}
-	if req.ReplayStatus != "missing" && req.ReplayStatus != "processing" && req.ReplayStatus != "ready" {
-		return errors.New("回放状态错误")
-	}
-	if req.ReplayStatus == "ready" && (!req.ReplayEnabled || !strings.HasPrefix(req.ReplayFileID, "cloud://")) {
-		return errors.New("可观看回放须启用并填写 File ID")
 	}
 	if course.Level == "class" {
 		var cohort model.CourseCohort
 		if err := model.DB.First(&cohort, "id = ? AND course_id = ?", req.CohortID, courseID).Error; err != nil {
 			return errors.New("请先选择该课程的班期")
-		}
-		if req.Type == 3 {
-			start := parseTime(req.LiveStart)
-			if start.Before(cohort.StartAt) || start.Add(time.Duration(req.Duration)*time.Second).After(cohort.EndAt) {
-				return errors.New("直播时间须在班期起止范围内")
-			}
 		}
 	} else if req.CohortID != 0 {
 		return errors.New("非班课不能关联班期")
@@ -139,7 +107,6 @@ func redactDeliveryLessons(c *gin.Context, courseID uint64, lessons []model.Cour
 	for i := range lessons {
 		lessons[i].MediaURL = ""
 		lessons[i].MediaFileID = ""
-		lessons[i].ReplayFileID = ""
 		lessons[i].DetailContent = ""
 	}
 }
@@ -287,7 +254,11 @@ func GetChapterLessons(c *gin.Context) {
 		return
 	}
 	var lessons []model.CourseLesson
-	if err := model.DB.Where("chapter_id = ?", chapterID).Order("sort_order asc, id asc").Find(&lessons).Error; err != nil {
+	query := model.DB.Where("chapter_id = ?", chapterID)
+	if !deliveryStaff(c, chapter.CourseID) {
+		query = query.Where("type IN (1, 2)")
+	}
+	if err := query.Order("sort_order asc, id asc").Find(&lessons).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取小节失败"})
 		return
 	}
@@ -324,15 +295,13 @@ func CreateLesson(c *gin.Context) {
 		return
 	}
 	lesson := model.CourseLesson{
-		CohortID: req.CohortID, ReplayEnabled: req.ReplayEnabled, ReplayFileID: req.ReplayFileID, ReplayStatus: req.ReplayStatus,
+		CohortID:      req.CohortID,
 		ChapterID:     chapterID,
 		Title:         req.Title,
 		Type:          req.Type,
 		MediaURL:      req.MediaURL,
 		MediaFileID:   req.MediaFileID,
 		DetailContent: req.DetailContent,
-		LiveRoomID:    req.LiveRoomID,
-		LiveStart:     parseTime(req.LiveStart),
 		ExpireAt:      parseTime(req.ExpireAt),
 		Duration:      req.Duration,
 		IsFree:        req.IsFree,
@@ -406,14 +375,12 @@ func UpdateLesson(c *gin.Context) {
 		return
 	}
 	updates := map[string]interface{}{
-		"cohort_id": req.CohortID, "replay_enabled": req.ReplayEnabled, "replay_file_id": req.ReplayFileID, "replay_status": req.ReplayStatus,
+		"cohort_id":      req.CohortID,
 		"title":          req.Title,
 		"type":           req.Type,
 		"media_url":      req.MediaURL,
 		"media_file_id":  req.MediaFileID,
 		"detail_content": req.DetailContent,
-		"live_room_id":   req.LiveRoomID,
-		"live_start":     parseTime(req.LiveStart),
 		"expire_at":      parseTime(req.ExpireAt),
 		"duration":       req.Duration,
 		"is_free":        req.IsFree,

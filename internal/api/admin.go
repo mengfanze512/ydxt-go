@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"ydxt-go/internal/model"
 
 	"github.com/gin-gonic/gin"
@@ -100,7 +101,11 @@ func GetTeacherList(c *gin.Context) {
 		return
 	}
 	var teachers []model.Teacher
-	if err := model.DB.Order("created_at desc").Find(&teachers).Error; err != nil {
+	query := model.DB.Order("created_at desc")
+	if scoped, id := currentTeacherScope(c); scoped {
+		query = query.Where("id = ?", id)
+	}
+	if err := query.Find(&teachers).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取讲师列表失败"})
 		return
 	}
@@ -109,15 +114,22 @@ func GetTeacherList(c *gin.Context) {
 
 // CreateTeacher 创建讲师账号
 func CreateTeacher(c *gin.Context) {
+	if !requireAdminAccount(c) {
+		return
+	}
 	var req teacherUpsertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
 		return
 	}
-	if req.Password == "" {
-		req.Password = "123456"
+	if !validateStaffAccount(c, accountTypeTeacher, 0, req.Username, req.Mobile, req.Password, req.Status, true) {
+		return
 	}
-	hashedPwd, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(400, gin.H{"code": 400, "msg": "密码加密失败: " + err.Error()})
+		return
+	}
 	teacher := model.Teacher{
 		Username:     req.Username,
 		PasswordHash: string(hashedPwd),
@@ -129,9 +141,6 @@ func CreateTeacher(c *gin.Context) {
 		Specialty:    req.Specialty,
 		Status:       req.Status,
 	}
-	if teacher.Status == 0 {
-		teacher.Status = 1
-	}
 	if err := model.DB.Create(&teacher).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建讲师失败"})
 		return
@@ -141,6 +150,9 @@ func CreateTeacher(c *gin.Context) {
 
 // UpdateTeacher 更新讲师账号
 func UpdateTeacher(c *gin.Context) {
+	if !requireAdminAccount(c) {
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "讲师ID无效"})
@@ -149,6 +161,9 @@ func UpdateTeacher(c *gin.Context) {
 	var req teacherUpsertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+		return
+	}
+	if !validateStaffAccount(c, accountTypeTeacher, id, req.Username, req.Mobile, req.Password, req.Status, false) {
 		return
 	}
 	updates := map[string]interface{}{
@@ -206,10 +221,14 @@ func CreateAdmin(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "管理员角色无效"})
 		return
 	}
-	if req.Password == "" {
-		req.Password = "123456"
+	if !validateStaffAccount(c, accountTypeAdmin, 0, req.Username, req.Mobile, req.Password, req.Status, true) {
+		return
 	}
-	hashedPwd, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(400, gin.H{"code": 400, "msg": "密码加密失败: " + err.Error()})
+		return
+	}
 	admin := model.Admin{
 		Username:     req.Username,
 		PasswordHash: string(hashedPwd),
@@ -217,9 +236,6 @@ func CreateAdmin(c *gin.Context) {
 		Mobile:       req.Mobile,
 		RoleCode:     req.RoleCode,
 		Status:       req.Status,
-	}
-	if admin.Status == 0 {
-		admin.Status = 1
 	}
 	if err := model.DB.Create(&admin).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建管理员失败"})
@@ -247,6 +263,9 @@ func UpdateAdmin(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "管理员角色无效"})
 		return
 	}
+	if !validateStaffAccount(c, accountTypeAdmin, id, req.Username, req.Mobile, req.Password, req.Status, false) {
+		return
+	}
 	updates := map[string]interface{}{
 		"username":  req.Username,
 		"name":      req.Name,
@@ -270,6 +289,40 @@ func UpdateAdmin(c *gin.Context) {
 	var admin model.Admin
 	_ = model.DB.Where("id = ?", id).First(&admin).Error
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": admin})
+}
+
+func validateStaffAccount(c *gin.Context, accountType string, id uint64, username, mobile, password string, status int8, creating bool) bool {
+	if strings.TrimSpace(username) == "" || username != strings.TrimSpace(username) || mobile != strings.TrimSpace(mobile) {
+		c.JSON(400, gin.H{"code": 400, "msg": "账号不能为空，账号和手机号首尾不能有空格"})
+		return false
+	}
+	if status != 0 && status != 1 {
+		c.JSON(400, gin.H{"code": 400, "msg": "账号状态只能为启用或禁用"})
+		return false
+	}
+	if (creating || password != "") && (len(password) < 8 || len(password) > 72 || strings.TrimSpace(password) == "") {
+		c.JSON(400, gin.H{"code": 400, "msg": "请设置 8 至 72 字节的账号密码"})
+		return false
+	}
+	for _, item := range []struct{ Table, Type string }{{"admins", accountTypeAdmin}, {"teachers", accountTypeTeacher}} {
+		query := model.DB.Table(item.Table).Where("(username = ? OR mobile = ?)", username, username)
+		if mobile != "" {
+			query = model.DB.Table(item.Table).Where("(username IN ? OR mobile IN ?)", []string{username, mobile}, []string{username, mobile})
+		}
+		if item.Type == accountType && id > 0 {
+			query = query.Where("id <> ?", id)
+		}
+		var count int64
+		if err := query.Count(&count).Error; err != nil {
+			c.JSON(500, gin.H{"code": 500, "msg": "查询账号唯一性失败: " + err.Error()})
+			return false
+		}
+		if count > 0 {
+			c.JSON(409, gin.H{"code": 409, "msg": "账号或手机号已被其他管理员或讲师使用"})
+			return false
+		}
+	}
+	return true
 }
 
 // AdminGetCourses 获取全部课程（后台）

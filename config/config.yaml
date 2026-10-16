@@ -18,7 +18,3 @@ wechat:
   app_secret: "710af88b1171f21031cdb8f019166828"
   mch_id: "请替换为微信商户号"
   mch_api_v3_key: "请替换为APIv3密钥"
-
-agora:
-  app_id: "请替换为声网AppID"
-  app_certificate: "请替换为声网App证书"

@@ -337,10 +337,13 @@ func parseAdminPreviewClaims(c *gin.Context) (*utils.CustomClaims, error) {
 		token = extractBearerToken(c.GetHeader("Authorization"))
 	}
 	if token == "" {
+		token = extractBearerToken(c.GetHeader("X-Token"))
+	}
+	if token == "" {
 		return nil, errors.New("缺少预览令牌")
 	}
 
-	claims, err := utils.ParseToken(token)
+	claims, _, err := utils.ValidateAccountToken(token)
 	if err != nil {
 		return nil, errors.New("无效的预览令牌")
 	}
@@ -779,19 +782,6 @@ func GetLessonPlayURL(c *gin.Context) {
 		deliveryReply(c, nil, fmt.Errorf("图文课时没有视频地址"))
 		return
 	}
-	if lesson.Type == 3 {
-		if lesson.LiveStatus == 1 {
-			deliveryReply(c, gin.H{"play_url": lesson.MediaURL, "is_live": true}, nil)
-			return
-		}
-		if lesson.LiveStatus != 2 || !lesson.ReplayEnabled || lesson.ReplayStatus != "ready" || lesson.ReplayFileID == "" {
-			deliveryReply(c, nil, fmt.Errorf("尚未开播或回放尚未就绪"))
-			return
-		}
-		lesson.MediaURL = ""
-		lesson.MediaFileID = lesson.ReplayFileID
-	}
-
 	// 已配置的转码/CDN 地址优先，HLS 清单及分片由播放器直接访问。
 	mediaURL := strings.TrimSpace(lesson.MediaURL)
 	if mediaURL != "" {

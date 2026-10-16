@@ -119,6 +119,9 @@ func GetLearningTasks(c *gin.Context) {
 	}
 
 	query := model.DB.Model(&model.LearningTask{})
+	if scoped, teacherID := currentTeacherScope(c); scoped {
+		query = query.Where("course_id IN (?)", model.DB.Model(&model.Course{}).Select("id").Where("teacher_id = ?", teacherID))
+	}
 	if courseID := c.Query("course_id"); courseID != "" {
 		query = query.Where("course_id = ?", courseID)
 	}
@@ -148,6 +151,9 @@ func CreateLearningTask(c *gin.Context) {
 	var req learningTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+		return
+	}
+	if _, ok := ensureCoursePermission(c, req.CourseID); !ok {
 		return
 	}
 	task := model.LearningTask{
@@ -196,6 +202,9 @@ func UpdateLearningTask(c *gin.Context) {
 	var req learningTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+		return
+	}
+	if _, ok := ensureCoursePermission(c, req.CourseID); !ok {
 		return
 	}
 	updates := map[string]interface{}{
@@ -689,11 +698,12 @@ func UpsertLessonProgress(c *gin.Context) {
 		SELECT COUNT(1)
 		FROM course_lessons cl
 		INNER JOIN course_chapters cc ON cc.id = cl.chapter_id
-		WHERE cc.course_id = ?`, req.CourseID).Scan(&totalLessons)
+                WHERE cc.course_id = ? AND cl.type IN (1, 2)`, req.CourseID).Scan(&totalLessons)
 
 	var completedLessons int64
-	model.DB.Model(&model.UserLessonProgress{}).
-		Where("user_id = ? AND course_id = ? AND is_completed = 1", userID, req.CourseID).
+	model.DB.Table("user_lesson_progress p").
+		Joins("JOIN course_lessons l ON l.id = p.lesson_id").
+		Where("p.user_id = ? AND p.course_id = ? AND p.is_completed = 1 AND l.type IN (1, 2)", userID, req.CourseID).
 		Count(&completedLessons)
 
 	progress := 0.0
@@ -768,7 +778,7 @@ func GetMyCourseProgress(c *gin.Context) {
 		err = model.DB.Table("course_lessons l").
 			Select("COUNT(l.id) AS total, COALESCE(SUM(CASE WHEN p.is_completed = 1 THEN 1 ELSE 0 END),0) AS completed").
 			Joins("LEFT JOIN user_lesson_progress p ON p.lesson_id = l.id AND p.user_id = ?", userID).
-			Where("l.cohort_id = ?", cohortID).Scan(&counts).Error
+			Where("l.cohort_id = ? AND l.type IN (1, 2)", cohortID).Scan(&counts).Error
 		if err != nil {
 			deliveryReply(c, nil, err)
 			return
@@ -790,6 +800,32 @@ func GetMyCourseProgress(c *gin.Context) {
 	if err := model.DB.Where("user_id = ? AND course_id = ?", userID, courseID).First(&progress).Error; err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": nil})
 		return
+	}
+	// Recalculate historical snapshots so disabled lessons no longer affect completion.
+	var counts struct {
+		Total     int
+		Completed int
+	}
+	if err := model.DB.Table("course_lessons l").
+		Select("COUNT(l.id) AS total, COALESCE(SUM(CASE WHEN p.is_completed = 1 THEN 1 ELSE 0 END), 0) AS completed").
+		Joins("JOIN course_chapters ch ON ch.id = l.chapter_id").
+		Joins("LEFT JOIN user_lesson_progress p ON p.lesson_id = l.id AND p.user_id = ?", userID).
+		Where("ch.course_id = ? AND l.type IN (1, 2)", courseID).Scan(&counts).Error; err != nil {
+		deliveryReply(c, nil, err)
+		return
+	}
+	progress.TotalLessons, progress.CompletedLessons = counts.Total, counts.Completed
+	progress.ProgressPercent, progress.Status = 0, "not_started"
+	if counts.Total > 0 {
+		progress.ProgressPercent = float64(counts.Completed) * 100 / float64(counts.Total)
+	}
+	if counts.Completed > 0 {
+		progress.Status = "in_progress"
+	}
+	if counts.Total > 0 && counts.Completed >= counts.Total {
+		progress.Status = "completed"
+	} else {
+		progress.CompletedAt = nil
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": progress})
 }

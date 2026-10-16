@@ -19,19 +19,13 @@ func (CourseChapter) TableName() string {
 // CourseLesson 课程小节
 type CourseLesson struct {
 	CohortID      uint64     `json:"cohort_id"`
-	ReplayEnabled bool       `json:"replay_enabled"`
-	ReplayFileID  string     `json:"replay_file_id"`
-	ReplayStatus  string     `json:"replay_status"`
-	LiveStatus    int8       `json:"live_status"`
 	ID            uint64     `gorm:"primaryKey;column:id" json:"id"`
 	ChapterID     uint64     `gorm:"column:chapter_id;index" json:"chapter_id"`
 	Title         string     `gorm:"column:title" json:"title"`
-	Type          int8       `gorm:"column:type" json:"type"` // 1=视频, 2=图文, 3=直播
+	Type          int8       `gorm:"column:type" json:"type"` // 1=视频, 2=图文
 	MediaURL      string     `gorm:"column:media_url" json:"media_url"`
 	MediaFileID   string     `gorm:"column:media_file_id" json:"media_file_id"`
 	DetailContent string     `gorm:"column:detail_content" json:"detail_content"`
-	LiveRoomID    string     `gorm:"column:live_room_id" json:"live_room_id"`
-	LiveStart     *time.Time `gorm:"column:live_start" json:"live_start"`
 	ExpireAt      *time.Time `gorm:"column:expire_at" json:"expire_at"`
 	Duration      int        `gorm:"column:duration" json:"duration"`
 	IsFree        int8       `gorm:"column:is_free" json:"is_free"`

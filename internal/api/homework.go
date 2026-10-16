@@ -178,6 +178,9 @@ func GetHomeworkSubmissions(c *gin.Context) {
 	}
 
 	query := model.DB.Model(&model.HomeworkSubmission{})
+	if scoped, teacherID := currentTeacherScope(c); scoped {
+		query = query.Where("task_id IN (?)", model.DB.Table("learning_tasks t").Select("t.id").Joins("JOIN courses c ON c.id = t.course_id").Where("c.teacher_id = ?", teacherID))
+	}
 	if taskID := c.Query("task_id"); taskID != "" {
 		query = query.Where("task_id = ?", taskID)
 	}
@@ -194,57 +197,9 @@ func GetHomeworkSubmissions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": submissions})
 }
 
-// GradeHomework 管理端批改作业
-type gradeHomeworkRequest struct {
-	Score    int    `json:"score"`
-	IsPassed int8   `json:"is_passed"`
-	Feedback string `json:"feedback"`
-}
-
+// GradeHomework shares the same ownership and score validation as teacher grading.
 func GradeHomework(c *gin.Context) {
-	if model.DB == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "数据库未连接"})
-		return
-	}
-
-	submissionID, ok := parseUintParam(c, "id")
-	if !ok {
-		return
-	}
-
-	var req gradeHomeworkRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
-		return
-	}
-	if req.Score < 0 {
-		req.Score = 0
-	}
-
-	graderID, _ := c.Get("userID")
-	now := time.Now()
-	updates := map[string]interface{}{
-		"score":     req.Score,
-		"is_passed": req.IsPassed,
-		"feedback":  req.Feedback,
-		"status":    "graded",
-		"graded_at": &now,
-	}
-	if uid, ok := graderID.(uint64); ok {
-		updates["grader_id"] = uid
-	}
-
-	result := model.DB.Model(&model.HomeworkSubmission{}).Where("id = ?", submissionID).Updates(updates)
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "批改失败"})
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "提交记录不存在"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
+	GradeTeacherHomework(c)
 }
 
 // GetHomeworkMediaPlayURL 获取作业媒体的临时播放/下载链接
@@ -252,6 +207,22 @@ func GetHomeworkMediaPlayURL(c *gin.Context) {
 	fileID := strings.TrimSpace(c.Query("file_id"))
 	if fileID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "缺少 file_id 参数"})
+		return
+	}
+	var count int64
+	query := model.DB.Model(&model.HomeworkSubmission{}).Where("media_file_id = ?", fileID)
+	if scoped, teacherID := currentTeacherScope(c); scoped {
+		query = query.Where("task_id IN (?)", model.DB.Table("learning_tasks t").Select("t.id").Joins("JOIN courses c ON c.id = t.course_id").Where("c.teacher_id = ?", teacherID))
+	} else if account, _ := c.Get("accountType"); account != accountTypeAdmin {
+		userID, _ := c.Get("userID")
+		query = query.Where("user_id = ?", userID)
+	}
+	if err := query.Count(&count).Error; err != nil {
+		c.JSON(500, gin.H{"code": 500, "msg": "校验附件权限失败: " + err.Error()})
+		return
+	}
+	if count == 0 {
+		c.JSON(403, gin.H{"code": 403, "msg": "附件不存在或不属于可访问的作业"})
 		return
 	}
 

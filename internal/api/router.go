@@ -59,6 +59,7 @@ func InitRouter() *gin.Engine {
 		// 使用我们在 middleware 编写的 JWTAuth 中间件
 		auth := v1.Group("")
 		auth.Use(middleware.JWTAuth())
+		auth.Use(AccountBusinessPolicy())
 		{
 			auth.GET("/courses/purchased", GetMyPurchasedCourses)
 			auth.GET("/lesson-comments", GetLessonComments)
@@ -69,20 +70,11 @@ func InitRouter() *gin.Engine {
 			// 用户模块
 			userGroup := auth.Group("/users")
 			{
-				userGroup.GET("/profile", func(c *gin.Context) {
-					userID, _ := c.Get("userID")
-					role, _ := c.Get("role")
-					c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": gin.H{"user_id": userID, "role": role}})
-				})
+				auth.GET("/auth/me", GetAccountProfile)
+				auth.POST("/auth/change-password", ChangePassword)
+				userGroup.GET("/profile", GetAccountProfile)
 				// 修改密码
 				userGroup.POST("/change-password", ChangePassword)
-			}
-
-			// 音视频直播模块
-			rtcGroup := auth.Group("/rtc")
-			{
-				// 获取声网进房 Token
-				rtcGroup.POST("/token", GenerateRTCToken)
 			}
 
 			shopGroup := auth.Group("/shop")
@@ -130,6 +122,11 @@ func InitRouter() *gin.Engine {
 			teacherGroup := auth.Group("/teacher")
 			teacherGroup.Use(middleware.RoleAuth(2, 9)) // 仅允许 role=2(讲师) 或 9(管理员) 访问
 			{
+				teacherGroup.GET("/workbench", GetTeacherWorkbench)
+				teacherGroup.GET("/courses", GetTeacherCourses)
+				teacherGroup.GET("/homework/submissions", GetTeacherHomework)
+				teacherGroup.POST("/homework/submissions/:id/grade", GradeTeacherHomework)
+				teacherGroup.GET("/homework/submissions/:id/play-url", GetTeacherHomeworkPlayURL)
 				teacherGroup.GET("/my-classes", func(c *gin.Context) {
 					c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "这里是教师专有的班级数据"})
 				})
@@ -138,6 +135,7 @@ func InitRouter() *gin.Engine {
 			// 管理后台业务接口
 			adminGroup := auth.Group("/admin")
 			adminGroup.Use(middleware.RoleAuth(2, 9)) // 管理员和讲师都可进入后台，数据范围由业务层再限制
+			adminGroup.Use(AdminResourcePolicy())
 			{
 				adminGroup.GET("/dashboard/summary", GetDashboardSummary)
 				adminGroup.GET("/operation-dashboard/overview", GetOperationDashboardOverview)
@@ -173,7 +171,6 @@ func InitRouter() *gin.Engine {
 				adminGroup.POST("/courses/:id/delivery-chapter", EnsureDeliveryChapter)
 				adminGroup.GET("/cohorts/:id/members", GetCohortMembers)
 				adminGroup.GET("/cohorts/:id/lessons", GetCohortLessons)
-				adminGroup.PATCH("/lessons/:id/live-status", SetDeliveryLiveStatus)
 
 				adminGroup.PUT("/chapters/:id", UpdateCourseChapter)
 				adminGroup.DELETE("/chapters/:id", DeleteCourseChapter)
@@ -228,7 +225,7 @@ func InitRouter() *gin.Engine {
 
 			// 管理端复用的非 /admin 前缀接口
 			adminCompatGroup := auth.Group("")
-			adminCompatGroup.Use(middleware.RoleAuth(2, 9))
+			adminCompatGroup.Use(middleware.RoleAuth(9))
 			{
 				adminCompatGroup.GET("/practice/records", GetPracticeRecords)
 			}

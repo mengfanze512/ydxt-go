@@ -30,14 +30,23 @@ func deliveryDB(c *gin.Context) bool {
 }
 
 func deliveryIdentity(c *gin.Context) *utils.CustomClaims {
+	if value, ok := c.Get("verifiedClaims"); ok {
+		claims, _ := value.(*utils.CustomClaims)
+		return claims
+	}
+	if _, checked := c.Get("identityChecked"); checked {
+		return nil
+	}
+	c.Set("identityChecked", true)
 	raw := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
 	if raw == "" {
 		raw = c.GetHeader("X-Token")
 	}
-	claims, err := utils.ParseToken(raw)
+	claims, _, err := utils.ValidateAccountToken(raw)
 	if err != nil {
 		return nil
 	}
+	c.Set("verifiedClaims", claims)
 	return claims
 }
 
@@ -223,10 +232,9 @@ func GetCohortMembers(c *gin.Context) {
 	type member struct {
 		model.CourseEnrollment
 		Nickname string `json:"nickname"`
-		Attended int64  `json:"attended"`
 	}
 	result := []member{}
-	err := model.DB.Table("course_enrollments e").Select("e.*, u.nickname, (SELECT COUNT(*) FROM course_attendances a JOIN course_lessons l ON l.id = a.lesson_id WHERE a.user_id = e.user_id AND l.cohort_id = e.cohort_id) AS attended").
+	err := model.DB.Table("course_enrollments e").Select("e.*, u.nickname").
 		Joins("LEFT JOIN users u ON u.id = e.user_id").Where("e.cohort_id = ?", id).Scan(&result).Error
 	deliveryReply(c, result, err)
 }
@@ -439,6 +447,9 @@ func coursePurchaseAccess(courseID, cohortID, userID uint64) error {
 }
 
 func courseAccess(c *gin.Context, lesson model.CourseLesson) error {
+	if lesson.Type != 1 && lesson.Type != 2 {
+		return errors.New("该课时已停用，请联系老师重新配置为视频或图文")
+	}
 	var chapter model.CourseChapter
 	if err := model.DB.First(&chapter, lesson.ChapterID).Error; err != nil {
 		return err
@@ -447,7 +458,7 @@ func courseAccess(c *gin.Context, lesson model.CourseLesson) error {
 		return nil
 	}
 	if lesson.ExpireAt != nil && time.Now().After(*lesson.ExpireAt) {
-		return errors.New("该课时或回放已过期")
+		return errors.New("该课时已过期")
 	}
 	if lesson.IsFree == 1 {
 		return nil
@@ -466,7 +477,7 @@ func courseAccess(c *gin.Context, lesson model.CourseLesson) error {
 	if setting.Sequential && lesson.CohortID == 0 {
 		var previous model.CourseLesson
 		err := model.DB.Table("course_lessons l").Select("l.*").Joins("JOIN course_chapters ch ON ch.id = l.chapter_id").
-			Where("ch.course_id = ? AND l.cohort_id = 0 AND (ch.sort_order < ? OR (ch.sort_order = ? AND ch.id < ?) OR (ch.id = ? AND (l.sort_order < ? OR (l.sort_order = ? AND l.id < ?))))",
+			Where("ch.course_id = ? AND l.type IN (1, 2) AND l.cohort_id = 0 AND (ch.sort_order < ? OR (ch.sort_order = ? AND ch.id < ?) OR (ch.id = ? AND (l.sort_order < ? OR (l.sort_order = ? AND l.id < ?))))",
 				chapter.CourseID, chapter.SortOrder, chapter.SortOrder, chapter.ID, chapter.ID, lesson.SortOrder, lesson.SortOrder, lesson.ID).
 			Order("ch.sort_order desc, ch.id desc, l.sort_order desc, l.id desc").Take(&previous).Error
 		if err == nil {
@@ -500,21 +511,6 @@ func GetDeliveryLesson(c *gin.Context) {
 	if err := courseAccess(c, lesson); err != nil {
 		deliveryReply(c, nil, err)
 		return
-	}
-	if lesson.Type == 3 {
-		if lesson.LiveStatus == 1 {
-			claims := deliveryIdentity(c)
-			if claims != nil {
-				err := model.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.CourseAttendance{LessonID: id, UserID: claims.UserID}).Error
-				if err != nil {
-					deliveryReply(c, nil, err)
-					return
-				}
-			}
-		} else if !(lesson.LiveStatus == 2 && lesson.ReplayEnabled && lesson.ReplayStatus == "ready" && lesson.ReplayFileID != "") {
-			deliveryReply(c, nil, errors.New("尚未开播或回放尚未就绪"))
-			return
-		}
 	}
 	deliveryReply(c, lesson, nil)
 }
@@ -587,7 +583,11 @@ func GetCohortLessons(c *gin.Context) {
 		}
 	}
 	lessons := []model.CourseLesson{}
-	err := model.DB.Where("cohort_id = ?", id).Order("COALESCE(live_start, created_at), sort_order, id").Find(&lessons).Error
+	query := model.DB.Where("cohort_id = ?", id)
+	if !deliveryStaff(c, cohort.CourseID) {
+		query = query.Where("type IN (1, 2)")
+	}
+	err := query.Order("sort_order, id").Find(&lessons).Error
 	redactDeliveryLessons(c, cohort.CourseID, lessons)
 	deliveryReply(c, lessons, err)
 }
@@ -641,43 +641,4 @@ func validateCourseLevelChange(id uint64, level string) error {
 		}
 	}
 	return nil
-}
-
-func SetDeliveryLiveStatus(c *gin.Context) {
-	if !deliveryDB(c) {
-		return
-	}
-	id, ok := parseUint(c, "id")
-	if !ok {
-		return
-	}
-	var lesson model.CourseLesson
-	if err := model.DB.First(&lesson, id).Error; err != nil {
-		deliveryReply(c, nil, err)
-		return
-	}
-	var chapter model.CourseChapter
-	if err := model.DB.First(&chapter, lesson.ChapterID).Error; err != nil {
-		deliveryReply(c, nil, err)
-		return
-	}
-	if _, ok := ensureCoursePermission(c, chapter.CourseID); !ok {
-		return
-	}
-	var req struct {
-		Status int8 `json:"status"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || lesson.Type != 3 || (req.Status != 1 && req.Status != 2) {
-		deliveryReply(c, nil, errors.New("无效的直播状态"))
-		return
-	}
-	if req.Status == 1 && (lesson.LiveStatus == 2 || lesson.MediaURL == "") {
-		deliveryReply(c, nil, errors.New("已结束的直播不能重新开播，且须配置直播播放地址"))
-		return
-	}
-	if req.Status == 2 && lesson.LiveStatus != 1 {
-		deliveryReply(c, nil, errors.New("直播尚未开始"))
-		return
-	}
-	deliveryReply(c, nil, model.DB.Model(&lesson).Update("live_status", req.Status).Error)
 }

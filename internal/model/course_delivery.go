@@ -31,10 +31,3 @@ type CourseEnrollment struct {
 	ExpiresAt *time.Time `json:"expires_at"`
 	CreatedAt time.Time  `json:"created_at"`
 }
-
-type CourseAttendance struct {
-	ID        uint64    `gorm:"primaryKey" json:"id"`
-	LessonID  uint64    `gorm:"uniqueIndex:uq_attendance" json:"lesson_id"`
-	UserID    uint64    `gorm:"uniqueIndex:uq_attendance" json:"user_id"`
-	CreatedAt time.Time `json:"created_at"`
-}

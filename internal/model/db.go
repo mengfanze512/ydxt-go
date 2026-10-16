@@ -72,7 +72,7 @@ func InitDB() {
 	enableAutoMigrate := os.Getenv("ENABLE_AUTO_MIGRATE") == "true"
 	if enableAutoMigrate {
 		err = DB.AutoMigrate(
-			&User{}, &Admin{}, &Teacher{}, &Course{}, &LiveRoom{}, &UserWallet{}, &LiveGiftRecord{},
+			&User{}, &Admin{}, &Teacher{}, &Course{},
 			&CourseChapter{}, &CourseLesson{},
 			&ShopGoods{}, &CartItem{}, &Order{}, &OrderItem{}, &SheetMusic{},
 			&UserCheckin{}, &PracticeRecord{}, &CommunityPost{}, &CommunityPostLike{}, &CommunityPostFavorite{}, &CommunityPostComment{}, &CommunitySensitiveWord{}, &FinanceSettlement{},
