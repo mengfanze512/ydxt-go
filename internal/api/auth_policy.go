@@ -27,7 +27,10 @@ func AccountBusinessPolicy() gin.HandlerFunc {
 			strings.HasSuffix(path, "/progress") || (strings.HasPrefix(path, "/homework/") && path != "/homework/media-play-url") ||
 			((strings.HasPrefix(path, "/community/") || strings.HasPrefix(path, "/lesson-comments")) && c.Request.Method != "GET")
 		if studentOnly && identity.AccountType != accountTypeUser {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 403, "msg": "该接口仅供学员账号使用，当前账号不能操作学员数据"})
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"code": 403,
+				"msg":  "该接口仅供学员账号使用，当前账号不能操作学员数据（" + c.Request.Method + " " + c.Request.URL.Path + "）",
+			})
 			return
 		}
 		c.Next()

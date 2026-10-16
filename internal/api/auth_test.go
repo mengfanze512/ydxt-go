@@ -96,6 +96,46 @@ func TestAccountLoginIdentityAndLegacyPassword(t *testing.T) {
 	}
 }
 
+func TestSuperAdminWithSeparateStudentAccount(t *testing.T) {
+	router := authFixture(t)
+	if err := model.DB.Model(&model.User{}).Where("id = ?", 1).Update("phone", "13800000099").Error; err != nil {
+		t.Fatal(err)
+	}
+	token := loginToken(t, router, "13800000099", "admin-secret")
+	_, identity, err := utils.ValidateAccountToken(token)
+	if err != nil || identity.AccountType != accountTypeAdmin || identity.RoleCode != "super_admin" || identity.ID != 10 {
+		t.Fatalf("student record changed admin identity: %+v, %v", identity, err)
+	}
+	for _, path := range []string{
+		"/api/v1/auth/me",
+		"/api/v1/admin/operation-dashboard/overview",
+		"/api/v1/admin/operation-dashboard/trends",
+		"/api/v1/admin/operation-dashboard/top-courses",
+		"/api/v1/admin/operation-dashboard/top-teachers",
+	} {
+		rec := authRequest(router, "GET", path, token, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("admin landing request rejected at %s: %s", path, rec.Body.String())
+		}
+	}
+	rec := authRequest(router, "GET", "/api/v1/courses/purchased", token, nil)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "GET /api/v1/courses/purchased") {
+		t.Fatal("learner access not isolated or missing diagnostic path: " + rec.Body.String())
+	}
+	var student model.User
+	if err := model.DB.First(&student, 1).Error; err != nil || student.Role != 1 || student.Phone != "13800000099" {
+		t.Fatalf("historical student account modified: %+v, %v", student, err)
+	}
+	if err := model.DB.Model(&model.User{}).Where("id = ?", 1).Update("password", "admin-secret").Error; err != nil {
+		t.Fatal(err)
+	}
+	rec = authRequest(router, "POST", "/api/v1/auth/phone-login", "", gin.H{"account": "13800000099", "password": "admin-secret"})
+	if rec.Code != http.StatusConflict {
+		t.Fatal("identical cross-account credentials silently selected a role")
+	}
+	_ = loginToken(t, router, "manager", "admin-secret")
+}
+
 func TestLegacyPasswordUpgradeRejectsChangedCredential(t *testing.T) {
 	authFixture(t)
 	candidate := loginCandidate{AccountType: accountTypeUser, ID: 1, Password: "student-secret"}
