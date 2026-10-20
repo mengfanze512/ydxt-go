@@ -22,7 +22,7 @@ func AccountBusinessPolicy() gin.HandlerFunc {
 			return
 		}
 		path := strings.TrimPrefix(c.FullPath(), "/api/v1")
-		studentOnly := strings.HasPrefix(path, "/shop/") || strings.HasPrefix(path, "/course-progress/") ||
+		studentOnly := strings.HasPrefix(path, "/learning-calendar") || strings.HasPrefix(path, "/shop/") || strings.HasPrefix(path, "/course-progress/") ||
 			path == "/lesson-progress" || path == "/course-orders" || path == "/courses/purchased" ||
 			strings.HasSuffix(path, "/progress") || (strings.HasPrefix(path, "/homework/") && path != "/homework/media-play-url") ||
 			((strings.HasPrefix(path, "/community/") || strings.HasPrefix(path, "/lesson-comments")) && c.Request.Method != "GET")

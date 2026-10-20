@@ -93,6 +93,8 @@ func InitRouter() *gin.Engine {
 			auth.POST("/lesson-progress", UpsertLessonProgress)
 			auth.GET("/lessons/:id/progress", GetDeliveryProgress)
 			auth.POST("/course-orders", CreateCourseOrder)
+			auth.GET("/learning-calendar", GetLearningCalendar)
+			auth.POST("/learning-calendar/checkin", DoCheckin)
 
 			// 作业相关（学员端）
 			homeworkGroup := auth.Group("/homework")
@@ -125,7 +127,7 @@ func InitRouter() *gin.Engine {
 			{
 				teacherGroup.GET("/workbench", GetTeacherWorkbench)
 				teacherGroup.GET("/courses", GetTeacherCourses)
-			teacherGroup.GET("/courses/:id/workbench", GetTeacherCourseWorkbench)
+				teacherGroup.GET("/courses/:id/workbench", GetTeacherCourseWorkbench)
 				teacherGroup.GET("/homework/submissions", GetTeacherHomework)
 				teacherGroup.POST("/homework/submissions/:id/grade", GradeTeacherHomework)
 				teacherGroup.GET("/homework/submissions/:id/play-url", GetTeacherHomeworkPlayURL)

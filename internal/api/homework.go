@@ -159,20 +159,27 @@ func GetMyHomeworkSubmissions(c *gin.Context) {
 
 	type studentHomeworkItem struct {
 		model.HomeworkSubmission
-		TaskTitle   string `json:"task_title"`
-		CourseID    uint64 `json:"course_id"`
-		CourseTitle string `json:"course_title"`
-		TotalScore  int    `json:"total_score"`
+		TaskTitle    string `json:"task_title"`
+		CourseID     uint64 `json:"course_id"`
+		CourseTitle  string `json:"course_title"`
+		TotalScore   int    `json:"total_score"`
+		TargetType   string `json:"target_type"`
+		ChapterTitle string `json:"chapter_title"`
+		LessonTitle  string `json:"lesson_title"`
+		CohortName   string `json:"cohort_name"`
 	}
 	submissions := []studentHomeworkItem{}
 	query := model.DB.Table("homework_submissions h").
 		Joins("LEFT JOIN learning_tasks t ON t.id = h.task_id").
 		Joins("LEFT JOIN courses co ON co.id = t.course_id").
+		Joins("LEFT JOIN course_lessons l ON t.target_type = 'lesson' AND l.id = t.target_id").
+		Joins("LEFT JOIN course_chapters ch ON ch.course_id = t.course_id AND ((t.target_type = 'chapter' AND ch.id = t.target_id) OR (t.target_type = 'lesson' AND ch.id = l.chapter_id))").
+		Joins("LEFT JOIN course_cohorts cohort ON cohort.id = l.cohort_id AND cohort.course_id = t.course_id").
 		Where("h.user_id = ?", userID)
 	if taskID := c.Query("task_id"); taskID != "" {
 		query = query.Where("h.task_id = ?", taskID)
 	}
-	if err := query.Select("h.*, COALESCE(t.title, '') AS task_title, COALESCE(t.course_id, 0) AS course_id, COALESCE(co.title, '') AS course_title, COALESCE(t.total_score, 0) AS total_score").
+	if err := query.Select("h.*, COALESCE(t.title, '') AS task_title, COALESCE(t.course_id, 0) AS course_id, COALESCE(co.title, '') AS course_title, COALESCE(t.total_score, 0) AS total_score, COALESCE(t.target_type, '') AS target_type, COALESCE(ch.title, '') AS chapter_title, CASE WHEN ch.id IS NOT NULL OR cohort.id IS NOT NULL THEN COALESCE(l.title, '') ELSE '' END AS lesson_title, COALESCE(cohort.name, '') AS cohort_name").
 		Order("h.id desc").Scan(&submissions).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": fmt.Sprintf("获取作业提交记录失败: %v", err)})
 		return
