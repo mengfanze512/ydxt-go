@@ -104,6 +104,9 @@ func TestTeacherWorkbenchScopeAndPagination(t *testing.T) {
 		"/api/v1/teacher/courses?page_size=0",
 		"/api/v1/teacher/courses?level=invalid",
 		"/api/v1/teacher/homework/submissions?status=invalid",
+		"/api/v1/teacher/homework/submissions?course_id=undefined",
+		"/api/v1/teacher/homework/submissions?course_id=0",
+		"/api/v1/teacher/homework/submissions?course_id=-1",
 	} {
 		if response := teacherTestRequest(t, router, 2, 10, "GET", url, nil); response.Code != 400 {
 			t.Fatalf("invalid parameters accepted: %s", response.Body.String())
@@ -118,6 +121,36 @@ func TestTeacherWorkbenchScopeAndPagination(t *testing.T) {
 	_ = json.Unmarshal(response.Body.Bytes(), &courseList)
 	if response.Code != 200 || courseList.Data.Total != 0 {
 		t.Fatal("course filter leaked other teacher's course")
+	}
+}
+
+func TestTeacherHomeworkAllCoursesAndSelectedCourse(t *testing.T) {
+	router := teacherTestRouter(t)
+	for _, filter := range []string{"", "&course_id=1", "&course_id="} {
+		response := teacherTestRequest(t, router, 2, 10, "GET",
+			"/api/v1/teacher/homework/submissions?status=submitted"+filter, nil)
+		var body struct {
+			Data struct {
+				Items []teacherHomeworkItem `json:"items"`
+				Total int                   `json:"total"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != 200 || body.Data.Total != 1 || len(body.Data.Items) != 1 || body.Data.Items[0].CourseID != 1 {
+			t.Fatalf("homework filter rejected or leaked scope: %s", response.Body.String())
+		}
+	}
+	response := teacherTestRequest(t, router, 2, 10, "GET",
+		"/api/v1/teacher/homework/submissions?status=submitted&course_id=2", nil)
+	var body struct {
+		Data struct {
+			Total int `json:"total"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != 200 || body.Data.Total != 0 {
+		t.Fatal("selected course bypassed teacher scope")
 	}
 }
 
@@ -177,5 +210,89 @@ func TestLegacyTeacherAdminEndpointsStayScoped(t *testing.T) {
 	_ = json.Unmarshal(response.Body.Bytes(), &tasks)
 	if response.Code != 200 || len(tasks.Data) != 1 || tasks.Data[0].CourseID != 1 {
 		t.Fatal("legacy task list leaked teacher data")
+	}
+}
+
+func TestTeacherCourseWorkbenchGroupsAndCounts(t *testing.T) {
+	router := teacherTestRouter(t)
+	db := model.DB
+	mustCreate(t, db, &model.Course{ID: 3, TeacherID: 10, Title: "My class", Level: "class", Status: 1})
+	mustCreate(t, db, &model.Course{ID: 4, TeacherID: 10, Title: "No homework yet", Level: "single", Status: 1})
+	mustCreate(t, db, &model.CourseChapter{ID: 5, CourseID: 1, Title: "My chapter"})
+	mustCreate(t, db, &model.CourseChapter{ID: 6, CourseID: 2, Title: "Other chapter"})
+	mustCreate(t, db, &model.CourseCohort{ID: 31, CourseID: 3, Name: "Class cohort"})
+	mustCreate(t, db, &model.CourseLesson{ID: 61, ChapterID: 5, Type: 1, Title: "My video"})
+	mustCreate(t, db, &model.CourseLesson{ID: 62, ChapterID: 5, Type: 3, Title: "Disabled lesson"})
+	mustCreate(t, db, &model.CourseLesson{ID: 63, CohortID: 31, Type: 2, Title: "My cohort content"})
+	mustCreate(t, db, &model.CourseLesson{ID: 64, ChapterID: 6, Type: 1, Title: "Other video"})
+	mustCreate(t, db, &model.LearningTask{ID: 3, CourseID: 3, Title: "Class task", TotalScore: 100})
+	mustCreate(t, db, &model.HomeworkSubmission{ID: 4, TaskID: 3, UserID: 1, Status: "submitted"})
+	for _, test := range []struct {
+		ID     string
+		Kind   string
+		Lesson uint64
+	}{{"1", "chapter", 61}, {"3", "cohort", 63}} {
+		response := teacherTestRequest(t, router, 2, 10, "GET", "/api/v1/teacher/courses/"+test.ID+"/workbench", nil)
+		var body struct {
+			Data struct {
+				Course      teacherCourseItem     `json:"course"`
+				Catalog     []teacherCatalogGroup `json:"catalog"`
+				LessonCount int                   `json:"lesson_count"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != 200 || body.Data.Course.PendingCount != 1 || body.Data.LessonCount != 1 ||
+			len(body.Data.Catalog) != 1 || body.Data.Catalog[0].Kind != test.Kind ||
+			len(body.Data.Catalog[0].Lessons) != 1 || body.Data.Catalog[0].Lessons[0].ID != test.Lesson {
+			t.Fatalf("course workbench lost scope or grouped incorrectly: %s", response.Body.String())
+		}
+	}
+	response := teacherTestRequest(t, router, 2, 10, "GET", "/api/v1/teacher/courses/2/workbench", nil)
+	if response.Code != 404 {
+		t.Fatal("teacher opened another teacher's workbench")
+	}
+        response = teacherTestRequest(t, router, 1, 0, "GET", "/api/v1/teacher/courses/1/workbench", nil)
+	if response.Code != 403 {
+		t.Fatal("student opened teacher workbench")
+	}
+	for _, test := range []struct {
+		Query string
+		Total int
+	}{{"", 3}, {"?homework_status=submitted&page_size=1", 2}, {"?homework_status=graded", 1}} {
+		response = teacherTestRequest(t, router, 2, 10, "GET", "/api/v1/teacher/courses"+test.Query, nil)
+		var body struct {
+			Data struct {
+				Items []teacherCourseItem `json:"items"`
+				Total int                 `json:"total"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != 200 || body.Data.Total != test.Total {
+			t.Fatalf("course-level homework filtering failed: %s", response.Body.String())
+		}
+		for _, item := range body.Data.Items {
+			if item.ID == 2 || (item.ID == 4 && (item.PendingCount != 0 || item.GradedCount != 0)) {
+				t.Fatal("course counts leaked or empty course counts were incorrect")
+			}
+		}
+	}
+	response = teacherTestRequest(t, router, 2, 10, "POST", "/api/v1/teacher/homework/submissions/1/grade",
+		gin.H{"score": 75, "is_passed": 1, "feedback": "Good"})
+	if response.Code != 200 {
+		t.Fatal(response.Body.String())
+	}
+	response = teacherTestRequest(t, router, 2, 10, "GET", "/api/v1/teacher/courses/1/workbench", nil)
+	var body struct {
+		Data struct {
+			Course teacherCourseItem `json:"course"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.Data.Course.PendingCount != 0 || body.Data.Course.GradedCount != 2 {
+		t.Fatal("workbench counts did not refresh after grading")
+	}
+	response = teacherTestRequest(t, router, 2, 10, "GET", "/api/v1/teacher/courses?homework_status=invalid", nil)
+	if response.Code != 400 {
+		t.Fatal("invalid homework status accepted")
 	}
 }

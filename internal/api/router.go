@@ -125,6 +125,7 @@ func InitRouter() *gin.Engine {
 			{
 				teacherGroup.GET("/workbench", GetTeacherWorkbench)
 				teacherGroup.GET("/courses", GetTeacherCourses)
+			teacherGroup.GET("/courses/:id/workbench", GetTeacherCourseWorkbench)
 				teacherGroup.GET("/homework/submissions", GetTeacherHomework)
 				teacherGroup.POST("/homework/submissions/:id/grade", GradeTeacherHomework)
 				teacherGroup.GET("/homework/submissions/:id/play-url", GetTeacherHomeworkPlayURL)

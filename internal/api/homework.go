@@ -148,7 +148,7 @@ func SubmitHomework(c *gin.Context) {
 // GetMyHomeworkSubmissions 学员查看自己的作业提交记录
 func GetMyHomeworkSubmissions(c *gin.Context) {
 	if model.DB == nil {
-		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "未连接数据库", "data": []model.HomeworkSubmission{}})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "数据库未连接"})
 		return
 	}
 
@@ -157,13 +157,24 @@ func GetMyHomeworkSubmissions(c *gin.Context) {
 		return
 	}
 
-	var submissions []model.HomeworkSubmission
-	query := model.DB.Where("user_id = ?", userID)
-	if taskID := c.Query("task_id"); taskID != "" {
-		query = query.Where("task_id = ?", taskID)
+	type studentHomeworkItem struct {
+		model.HomeworkSubmission
+		TaskTitle   string `json:"task_title"`
+		CourseID    uint64 `json:"course_id"`
+		CourseTitle string `json:"course_title"`
+		TotalScore  int    `json:"total_score"`
 	}
-	if err := query.Order("id desc").Find(&submissions).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "获取作业提交记录失败"})
+	submissions := []studentHomeworkItem{}
+	query := model.DB.Table("homework_submissions h").
+		Joins("LEFT JOIN learning_tasks t ON t.id = h.task_id").
+		Joins("LEFT JOIN courses co ON co.id = t.course_id").
+		Where("h.user_id = ?", userID)
+	if taskID := c.Query("task_id"); taskID != "" {
+		query = query.Where("h.task_id = ?", taskID)
+	}
+	if err := query.Select("h.*, COALESCE(t.title, '') AS task_title, COALESCE(t.course_id, 0) AS course_id, COALESCE(co.title, '') AS course_title, COALESCE(t.total_score, 0) AS total_score").
+		Order("h.id desc").Scan(&submissions).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": fmt.Sprintf("获取作业提交记录失败: %v", err)})
 		return
 	}
 
