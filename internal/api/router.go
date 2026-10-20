@@ -148,6 +148,8 @@ func InitRouter() *gin.Engine {
 				adminGroup.GET("/operation-dashboard/top-teachers", GetOperationDashboardTopTeachers)
 
 				adminGroup.GET("/users", AdminGetUsers)
+				adminGroup.GET("/checkins", AdminGetCheckins)
+				adminGroup.DELETE("/checkins/:id", AdminDeleteCheckin)
 
 				adminGroup.GET("/teachers", GetTeacherList)
 				adminGroup.POST("/teachers", CreateTeacher)

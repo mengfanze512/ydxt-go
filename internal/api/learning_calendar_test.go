@@ -96,3 +96,74 @@ func TestCheckinStreakAcrossMonth(t *testing.T) {
 		t.Fatal("streak boundary is incorrect")
 	}
 }
+
+func TestAdminCheckinListAndDelete(t *testing.T) {
+	db := deliveryTestDB(t)
+	if err := db.AutoMigrate(&model.UserCheckin{}, &model.LearningTask{}); err != nil {
+		t.Fatal(err)
+	}
+	mustCreate(t, db, &model.Admin{ID: 5, RoleCode: "admin", Status: 1})
+	mustCreate(t, db, &model.Teacher{ID: 10, Status: 1})
+	db.Model(&model.User{}).Where("id = 1").Updates(map[string]any{"nickname": "Test learner", "phone": "13800000000"})
+	mustCreate(t, db, &model.UserCheckin{ID: 101, UserID: 1, CheckinDate: learningToday()})
+	mustCreate(t, db, &model.UserCheckin{ID: 102, UserID: 2, CheckinDate: "2026-01-01"})
+	router := InitRouter()
+	response := teacherTestRequest(t, router, 9, 0, "GET", "/api/v1/admin/checkins?keyword=13800000000&page_size=1&start_date="+learningToday()+"&end_date="+learningToday(), nil)
+	var body struct {
+		Data struct {
+			Total int `json:"total"`
+			Items []struct {
+				ID    uint64 `json:"id"`
+				Phone string `json:"phone"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != 200 || body.Data.Total != 1 || len(body.Data.Items) != 1 || body.Data.Items[0].ID != 101 || body.Data.Items[0].Phone != "13800000000" {
+		t.Fatal(response.Body.String())
+	}
+	for _, role := range []int8{1, 2} {
+		teacherID := uint64(0)
+		if role == 2 {
+			teacherID = 10
+		}
+		for _, route := range []struct{ Method, URL string }{{"GET", "/api/v1/admin/checkins"}, {"DELETE", "/api/v1/admin/checkins/101"}} {
+			res := teacherTestRequest(t, router, role, teacherID, route.Method, route.URL, nil)
+			if res.Code != 403 {
+				t.Fatalf("non-admin checkin access: %s", res.Body.String())
+			}
+		}
+	}
+	response = teacherTestRequest(t, router, 9, 0, "GET", "/api/v1/admin/checkins?start_date=invalid", nil)
+	if response.Code != 400 {
+		t.Fatal("invalid date accepted")
+	}
+	response = teacherTestRequest(t, router, 9, 0, "DELETE", "/api/v1/admin/checkins/101", nil)
+	if response.Code != 200 {
+		t.Fatal(response.Body.String())
+	}
+	response = teacherTestRequest(t, router, 9, 0, "DELETE", "/api/v1/admin/checkins/101", nil)
+	if response.Code != 404 {
+		t.Fatal("missing record deletion must fail")
+	}
+	var count int64
+	db.Model(&model.UserCheckin{}).Where("id = 102").Count(&count)
+	if count != 1 {
+		t.Fatal("delete affected another record")
+	}
+	c, rec := deliveryTestContext(t, 1, "/calendar", nil)
+	GetLearningCalendar(c)
+	var calendar struct {
+		Data struct {
+			Checked bool `json:"checked_today"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &calendar); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 200 || calendar.Data.Checked {
+		t.Fatal("deleted checkin remained on learner calendar")
+	}
+}
