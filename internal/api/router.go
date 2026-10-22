@@ -72,6 +72,7 @@ func InitRouter() *gin.Engine {
 			userGroup := auth.Group("/users")
 			{
 				auth.GET("/auth/me", GetAccountProfile)
+                                auth.PATCH("/auth/profile", UpdateMyProfile)
 				auth.POST("/auth/change-password", ChangePassword)
 				userGroup.GET("/profile", GetAccountProfile)
 				// 修改密码
